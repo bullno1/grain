@@ -1,0 +1,4 @@
+#!/bin/sh
+
+PROGRAM=`basename $0`
+./build && exec .build/bin/$PROGRAM $*
