@@ -1,0 +1,11 @@
+@require linear_motion
+@param vec2 center
+@param float radius
+
+vec2 normal = position - center;
+bool inCircle = length(normal) < radius;
+bool goingIn = dot(normal, velocity) < 0.0;
+bool bounce = inCircle && goingIn;
+vec2 newV = reflect(velocity, normalize(normal));
+velocity = (bounce) ? newV / 3 : velocity;
+life = select(bounce, life / 2, life);

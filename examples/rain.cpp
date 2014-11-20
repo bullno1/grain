@@ -1,5 +1,6 @@
 #include <iostream>
 #include <grainr.hpp>
+#include <SDL.h>
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -14,6 +15,7 @@ SystemDefinition* sysDef = NULL;
 ParticleSystem* sys = NULL;
 Emitter* emitter = NULL;
 Affector* affector = NULL;
+Affector* deflector = NULL;
 Renderer* renderer = NULL;
 GLuint vao;
 GLuint buff;
@@ -23,7 +25,7 @@ bool init(Context& ctx)
 	sysDef = ctx.load("resources/rain", cerr);
 	if(sysDef == NULL) return false;
 
-	sys = sysDef->create(256, 256);
+	sys = sysDef->create(256, 512);
 	emitter = sys->createEmitter("line", cerr);
 	if(emitter == NULL) return false;
 
@@ -32,6 +34,9 @@ bool init(Context& ctx)
 
 	renderer = sys->createRenderer("point", cerr);
 	if(renderer == NULL) return false;
+
+	deflector = sys->createAffector("circle_deflector", cerr);
+	if(deflector == NULL) return false;
 
 	renderer->prepare();
 	mat4x4 proj = glm::ortho(-400.0f, 400.0f, -300.0f, 300.0f, -1.0f, 1.0f);
@@ -63,6 +68,7 @@ void cleanup()
 	if(renderer) renderer->destroy();
 	if(affector) affector->destroy();
 	if(emitter) emitter->destroy();
+	if(deflector) deflector->destroy();
 	if(sys) sys->destroy();
 	if(sysDef) sysDef->destroy();
 }
@@ -74,11 +80,21 @@ void update(Context& ctx)
 	emitter->prepare();
 	emitter->setParamFloat("min_life", 23.0f);
 	emitter->setParamFloat("max_life", 29.0f);
-	emitter->setParamFloat("max_horizontal_speed", 1.10f);
+	emitter->setParamFloat("max_horizontal_speed", 3.10f);
 	emitter->setParamFloat("width", 800.0f);
 	emitter->setParamFloat("height", 300.0f);
 	emitter->setRate(0.002);
 	emitter->run();
+
+	deflector->prepare();
+	deflector->setParamFloat("radius", 30.0f);
+	int x, y;
+	SDL_GetMouseState(&x, &y);
+	GLint uniformLoc = deflector->getUniformLocation("center");
+	glUniform2f(uniformLoc, x - 400, -(y - 300));
+	deflector->run();
+	glUniform2f(uniformLoc, 0, 0);
+	deflector->run();
 
 	affector->prepare();
 	glUniform2f(affector->getUniformLocation("gravity"), 0.0f, -1.8f);
@@ -90,5 +106,6 @@ void render()
 	renderer->prepare();
 	glBindVertexArray(vao);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glPointSize(2);
 	sys->render(GL_POINTS, 1);
 }

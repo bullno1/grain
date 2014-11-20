@@ -1,0 +1,247 @@
+2
+@geyser.affector
+#version 140
+uniform float _time;
+uniform float _chance;
+uniform float dt;
+
+uniform sampler2D _tex0;
+uniform sampler2D _tex1;
+
+out vec4 out0;
+out vec4 out1;
+
+uniform vec2 gravity;
+
+float rand_(inout int _count)
+{
+	++_count;
+	return fract(sin(dot(vec2(gl_FragCoord.x * _count, gl_FragCoord.y * _time), vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+float random_range_(inout int _count, float lower, float upper)
+{
+	return lower + rand_(_count) * (upper - lower);
+}
+
+#define rand() rand_(_count)
+#define random_range(lower, upper) random_range_(_count, lower, upper)
+#define select(condition, ifTrue, ifFalse) mix(ifFalse, ifTrue, float(condition))
+
+void linear_motion(inout int _count, inout float life, inout vec2 position, inout vec2 velocity){
+
+position += velocity*dt;
+
+}
+
+void uniform_gravity(inout int _count, inout float life, inout vec2 position, inout vec2 velocity){
+linear_motion(_count, life, position, velocity);
+
+velocity += gravity * dt;
+
+}
+
+void aging(inout int _count, inout float life, inout vec2 position, inout vec2 velocity){
+life -= dt;
+
+}
+
+void geyser(inout int _count, inout float life, inout vec2 position, inout vec2 velocity){
+uniform_gravity(_count, life, position, velocity);
+linear_motion(_count, life, position, velocity);
+aging(_count, life, position, velocity);
+
+}
+
+void main()  {
+int _count = 0;
+ivec2 _texCoord = ivec2(gl_FragCoord.xy);
+vec4 stream0 = texelFetch(_tex0, _texCoord, 0);
+vec4 stream1 = texelFetch(_tex1, _texCoord, 0);
+float life = float(stream0.x);
+vec2 position = vec2(stream0.y, stream0.z);
+vec2 velocity = vec2(stream0.w, stream1.x);
+geyser(_count, life, position, velocity);
+out0.x = life;
+out0.y = position.x;
+out0.z = position.y;
+out0.w = velocity.x;
+out1.x = velocity.y;
+}
+@circle_deflector.affector
+#version 140
+uniform float _time;
+uniform float _chance;
+uniform float dt;
+
+uniform sampler2D _tex0;
+uniform sampler2D _tex1;
+
+out vec4 out0;
+out vec4 out1;
+
+uniform vec2 center;
+uniform float radius;
+
+float rand_(inout int _count)
+{
+	++_count;
+	return fract(sin(dot(vec2(gl_FragCoord.x * _count, gl_FragCoord.y * _time), vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+float random_range_(inout int _count, float lower, float upper)
+{
+	return lower + rand_(_count) * (upper - lower);
+}
+
+#define rand() rand_(_count)
+#define random_range(lower, upper) random_range_(_count, lower, upper)
+#define select(condition, ifTrue, ifFalse) mix(ifFalse, ifTrue, float(condition))
+
+void linear_motion(inout int _count, inout float life, inout vec2 position, inout vec2 velocity){
+
+position += velocity*dt;
+
+}
+
+void circle_deflector(inout int _count, inout float life, inout vec2 position, inout vec2 velocity){
+linear_motion(_count, life, position, velocity);
+
+vec2 normal = position - center;
+bool inCircle = length(normal) < radius;
+bool goingIn = dot(normal, velocity) < 0.0;
+bool bounce = inCircle && goingIn;
+vec2 newV = reflect(velocity, normalize(normal));
+velocity = (bounce) ? newV / 3 : velocity;
+life = select(bounce, life / 2, life);
+
+}
+
+void main()  {
+int _count = 0;
+ivec2 _texCoord = ivec2(gl_FragCoord.xy);
+vec4 stream0 = texelFetch(_tex0, _texCoord, 0);
+vec4 stream1 = texelFetch(_tex1, _texCoord, 0);
+float life = float(stream0.x);
+vec2 position = vec2(stream0.y, stream0.z);
+vec2 velocity = vec2(stream0.w, stream1.x);
+circle_deflector(_count, life, position, velocity);
+out0.x = life;
+out0.y = position.x;
+out0.z = position.y;
+out0.w = velocity.x;
+out1.x = velocity.y;
+}
+@line.emitter
+#version 140
+uniform float _time;
+uniform float _chance;
+uniform float dt;
+
+uniform sampler2D _tex0;
+uniform sampler2D _tex1;
+
+out vec4 out0;
+out vec4 out1;
+
+uniform float height;
+uniform float max_horizontal_speed;
+uniform float max_life;
+uniform float min_life;
+uniform float width;
+
+float rand_(inout int _count)
+{
+	++_count;
+	return fract(sin(dot(vec2(gl_FragCoord.x * _count, gl_FragCoord.y * _time), vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+float random_range_(inout int _count, float lower, float upper)
+{
+	return lower + rand_(_count) * (upper - lower);
+}
+
+#define rand() rand_(_count)
+#define random_range(lower, upper) random_range_(_count, lower, upper)
+#define select(condition, ifTrue, ifFalse) mix(ifFalse, ifTrue, float(condition))
+
+void aging(inout int _count, inout float life, inout vec2 position, inout vec2 velocity){
+
+life = random_range(min_life, max_life);
+
+}
+
+void line(inout int _count, inout float life, inout vec2 position, inout vec2 velocity){
+aging(_count, life, position, velocity);
+
+position = vec2(random_range(-0.5, 0.5) * width, height);
+velocity = vec2(random_range(-0.5, 0.5) * max_horizontal_speed, 0.0);
+
+}
+
+void main()  {
+int _count = 0;
+ivec2 _texCoord = ivec2(gl_FragCoord.xy);
+vec4 stream0 = texelFetch(_tex0, _texCoord, 0);
+vec4 stream1 = texelFetch(_tex1, _texCoord, 0);
+float previous_life = float(stream0.x);
+vec2 previous_position = vec2(stream0.y, stream0.z);
+vec2 previous_velocity = vec2(stream0.w, stream1.x);
+float life;
+vec2 position;
+vec2 velocity;
+line(_count, life, position, velocity);
+bool canEmit = rand() < _chance;
+bool dead = previous_life < 0.0;
+float selected = float(dead && canEmit);
+life = mix(previous_life, life, selected);
+position = mix(previous_position, position, selected);
+velocity = mix(previous_velocity, velocity, selected);
+out0.x = life;
+out0.y = position.x;
+out0.z = position.y;
+out0.w = velocity.x;
+out1.x = velocity.y;
+}
+@point.vsh
+#version 140
+uniform int _texWidth;
+uniform int _texHeight;
+uniform sampler2D _tex0;
+uniform sampler2D _tex1;
+
+uniform mat4x4 uMVP;
+
+void main() {
+ivec2 _size = ivec2(_texWidth, _texHeight);
+ivec2 _texCoord = ivec2(gl_InstanceID % _size.x, gl_InstanceID / _size.y);
+vec4 stream0 = texelFetch(_tex0, _texCoord, 0);
+vec4 stream1 = texelFetch(_tex1, _texCoord, 0);
+float life = float(stream0.x);
+vec2 position = vec2(stream0.y, stream0.z);
+vec2 velocity = vec2(stream0.w, stream1.x);
+
+float alive = float(life > 0.0);
+gl_Position = uMVP * vec4(position.x, position.y, 0.0, alive);
+
+}
+@point.fsh
+#version 140
+uniform int _texWidth;
+uniform int _texHeight;
+uniform sampler2D _tex0;
+uniform sampler2D _tex1;
+
+out vec4 out0;
+
+void main() {
+ivec2 _texCoord = ivec2(gl_FragCoord.xy);
+vec4 stream0 = texelFetch(_tex0, _texCoord, 0);
+vec4 stream1 = texelFetch(_tex1, _texCoord, 0);
+float life = float(stream0.x);
+vec2 position = vec2(stream0.y, stream0.z);
+vec2 velocity = vec2(stream0.w, stream1.x);
+
+out0 = vec4(0.0, 1.0, 1.0, 1.0);
+
+}
