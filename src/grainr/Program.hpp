@@ -34,7 +34,7 @@ class Emitter: public Program
 {
 	friend class ParticleSystem;
 public:
-	void setRate(float numParticles);
+	void setRate(float rate);
 
 private:
 	Emitter();

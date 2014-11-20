@@ -134,16 +134,16 @@ void update(Context& ctx)
 
 	emitter->prepare();
 	emitter->setParamFloat("min_life", 17.0f);
-	emitter->setParamFloat("max_life", 19.5f);
-	emitter->setParamFloat("min_speed", 15.0f);
-	emitter->setParamFloat("max_speed", 18.0f);
+	emitter->setParamFloat("max_life", 18.5f);
+	emitter->setParamFloat("min_speed", 18.0f);
+	emitter->setParamFloat("max_speed", 21.0f);
 	emitter->setParamFloat("min_angle", 0.4f * M_PI);
 	emitter->setParamFloat("max_angle", 0.6f * M_PI);
-	emitter->setRate(0.000);
+	emitter->setRate(0.0001);
 	emitter->run();
 
 	affector->prepare();
-	glUniform2f(affector->getUniformLocation("gravity"), 0.0f, -9.8f);
+	glUniform2f(affector->getUniformLocation("gravity"), 0.0f, -290.8f);
 	affector->run();
 }
 

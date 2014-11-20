@@ -204,18 +204,8 @@ const char* sHeader =
 	"uniform float dt;\n"
 	;
 
-const char* sBuiltins =
-	"float rand_(inout int _count){\n"
-		"++_count;\n"
-		"return fract(sin(dot(gl_FragCoord.xy, vec2(12.9898 * _time,78.233 * _count))) * 43758.5453);\n"
-	"}\n"
-	"float random_range_(inout int _count, float lower, float upper){\n"
-		"return lower + rand_(_count) * (upper - lower);\n"
-	"}\n"
-	"#define rand() rand_(_count)\n"
-	"#define random_range(lower, upper) random_range_(_count, lower, upper)\n"
-	"#define select(condition, ifTrue, ifFalse) mix(ifFalse, ifTrue, float(condition))\n"
-	;
+extern "C" const char builtins[];
+extern "C" const size_t builtins_len;
 
 typedef map<string, Script> ScriptCache;
 typedef map<string, string> CodeCache;
@@ -571,7 +561,8 @@ bool linkModifier(const CompileContext& compileCtx, const Script* script, Script
 	code << script->mCustomDeclarations << endl;
 
 	// add builtin functions
-	code << sBuiltins << endl;
+	code.write(builtins, builtins_len);
+	code << endl;
 
 	// add dependencies
 	for(vector<string>::const_reverse_iterator itr = sortedDeps.rbegin(); itr != sortedDeps.rend(); ++itr)

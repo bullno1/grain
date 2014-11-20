@@ -69,11 +69,9 @@ Emitter::Emitter()
 Emitter::~Emitter()
 {}
 
-void Emitter::setRate(float numParticles)
+void Emitter::setRate(float rate)
 {
-	size_t maxParticles = mSystem->mTexWidth * mSystem->mTexHeight;
-	float chance = numParticles / (float)(maxParticles);
-	glUniform1f(getUniformLocation("_chance"), chance);
+	glUniform1f(getUniformLocation("_chance"), rate);
 }
 
 Affector::Affector()
