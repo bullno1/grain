@@ -9,3 +9,5 @@ if [ ! -f build.ninja ]; then
 fi
 
 ninja
+cd ..
+./build-resources

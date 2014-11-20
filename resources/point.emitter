@@ -1,0 +1,12 @@
+@param vec2 emission_point
+@param float min_speed
+@param float max_speed
+@param float min_angle
+@param float max_angle
+@attribute vec2 position
+@attribute vec2 velocity
+
+position = emission_point;
+float speed = random_range(min_speed, max_speed);
+float angle = random_range(min_angle, max_angle);
+velocity = vec2(cos(angle), sin(angle)) * speed;

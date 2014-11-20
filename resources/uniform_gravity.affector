@@ -1,0 +1,4 @@
+@param vec2 gravity
+@require linear_motion
+
+velocity += gravity * dt;

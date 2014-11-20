@@ -1,0 +1,4 @@
+#!/bin/sh
+
+cd resources
+../.build/bin/grainc -o geyser geyser.affector geyser.emitter point.vsh point.fsh
