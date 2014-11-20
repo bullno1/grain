@@ -50,8 +50,6 @@ ParticleSystem::ParticleSystem(const SystemDefinition* def, size_t width, size_t
 	float* data = new float[4 * width * height];
 	for(size_t i = 0; i < def->mNumTextures; ++i)
 	{
-		glEnable(GL_TEXTURE_2D);
-
 		GLuint evenTexture = createTexture(width, height, data);
 		GLenum evenTarget = GL_COLOR_ATTACHMENT0 + i;
 		glFramebufferTexture2D(GL_FRAMEBUFFER, evenTarget, GL_TEXTURE_2D, evenTexture, 0);

@@ -65,7 +65,7 @@ GLuint createProgram(GLuint vsh, GLuint fsh, size_t numOutputs, std::ostream& er
 	{
 		glUseProgram(prog);
 		stringstream ss;
-		ss << "tex";
+		ss << "_tex";
 		ss << i;
 		glUniform1i(glGetUniformLocation(prog, ss.str().c_str()), i);
 	}
