@@ -7,6 +7,7 @@
 
 struct CompileOptions
 {
+	bool mOptimize;
 	std::string mOutput;
 	std::vector<std::string> mInputs;
 	std::vector<std::string> mIncludePaths;

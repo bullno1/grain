@@ -182,7 +182,7 @@ struct CompileContext
 		for(int i = 0; i < mNumTextures; ++i)
 		{
 			samplerDecls << "uniform sampler2D _tex" << i << ";" << endl;
-			outputDecls << "out vec4 _out" << i << ";" << endl;
+			outputDecls << "out vec4 out" << i << ";" << endl;
 		}
 		mOutputDeclarations = outputDecls.str();
 		mSamplerDeclarations = samplerDecls.str();
@@ -627,7 +627,7 @@ bool linkModifier(const CompileContext& compileCtx, const Script* script, Script
 		{
 			for(int j = 0; j < size; ++j)
 			{
-				code << "_out" << mapping.mTextureUnit << "." << fieldNames[mapping.mVectorField]
+				code << "out" << mapping.mTextureUnit << "." << fieldNames[mapping.mVectorField]
 				     << " = " << itr->first << "." << fieldNames[count] << ";" << endl;
 				mapping = mapping.next();
 				++count;
@@ -635,7 +635,7 @@ bool linkModifier(const CompileContext& compileCtx, const Script* script, Script
 		}
 		else
 		{
-			code << "_out" << mapping.mTextureUnit << "." << fieldNames[mapping.mVectorField]
+			code << "out" << mapping.mTextureUnit << "." << fieldNames[mapping.mVectorField]
 			     << " = " << itr ->first << ";" << endl;
 		}
 	}
@@ -701,6 +701,8 @@ int compile(const CompileOptions& opts)
 	CodeCache codeCache;
 	stringstream output;
 
+	output << compileCtx.mNumTextures << endl;
+
 	glslopt_ctx* optCtx = glslopt_initialize(kGlslTargetOpenGL);
 	for(vector<const Script*>::const_iterator itr = scripts.begin(); itr != scripts.end(); ++itr)
 	{
@@ -727,14 +729,13 @@ int compile(const CompileOptions& opts)
 			return 1;
 		}
 
-		cerr << "@" << script->mFileName << endl << code.str() << endl;
 		bool isVertex = script->mType == ScriptType::VertexShader;
 		glslopt_shader* shader = glslopt_optimize(optCtx, isVertex ? kGlslOptShaderVertex : kGlslOptShaderFragment, code.str().c_str(), 0);
 		bool status = glslopt_get_status(shader);
 		if(status)
 		{
 			output << "@" << script->mFileName << endl
-			       << glslopt_get_output(shader);
+			       << (opts.mOptimize ? glslopt_get_output(shader) : code.str().c_str());
 		}
 		else
 		{

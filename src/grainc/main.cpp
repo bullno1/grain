@@ -11,7 +11,8 @@ int main(int argc, const char* const argv[])
 	{
 		cout << "Usage: grainc [options] file..." << endl
 		     << "Options:" << endl
-		     << left << setw(20) << "-o <output>" << "Set output file name" << endl
+		     << left << setw(20) << "-o <output>"  << "Set output file name" << endl
+		     << left << setw(20) << "-O"           << "Optimize generated code" << endl
 		     << left << setw(20) << "-I <include>" << "Add include path for @require" << endl;
 		return 1;
 	}
@@ -19,10 +20,15 @@ int main(int argc, const char* const argv[])
 	CompileOptions opts;
 
 	opts.mOutput = "a.out";
+	opts.mOptimize = false;
 
 	for(int i = 1; i < argc; ++i)
 	{
-		if(strcmp(argv[i], "-o") == 0 && (++i < argc))
+		if(strcmp(argv[i], "-O") == 0)
+		{
+			opts.mOptimize = true;
+		}
+		else if(strcmp(argv[i], "-o") == 0 && (++i < argc))
 		{
 			opts.mOutput = argv[i];
 		}
