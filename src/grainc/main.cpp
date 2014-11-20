@@ -12,8 +12,7 @@ int main(int argc, const char* const argv[])
 		cout << "Usage: grainc [options] file..." << endl
 		     << "Options:" << endl
 		     << left << setw(20) << "-o <output>"  << "Set output file name" << endl
-		     << left << setw(20) << "-O"           << "Optimize generated code" << endl
-		     << left << setw(20) << "-I <include>" << "Add include path for @require" << endl;
+		     << left << setw(20) << "-O"           << "Optimize generated code" << endl;
 		return 1;
 	}
 
