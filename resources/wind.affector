@@ -1,0 +1,7 @@
+@attribute vec2 position
+@attribute vec2 velocity
+
+bool high = position.y > 10.0;
+velocity = select(high, velocity + vec2(0.9f * dt, 0), velocity);
+bool veryHigh = position.y > 150.0;
+velocity = select(veryHigh, velocity + vec2(-1.8f * dt, 0), velocity);

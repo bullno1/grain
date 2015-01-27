@@ -1,0 +1,4 @@
+@attribute float ground_pos
+@require linear_motion
+
+/*velocity.y = select(velocity.y < 0, -velocity.y, velocity.y);*/
