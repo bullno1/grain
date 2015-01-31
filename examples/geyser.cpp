@@ -20,7 +20,7 @@ GLuint buff;
 
 bool init(Context& ctx)
 {
-	sysDef = ctx.load("resources/geyser", cerr);
+	sysDef = ctx.load("resources/bin/geyser", cerr);
 	if(sysDef == NULL) return false;
 
 	sys = sysDef->create(256, 256);

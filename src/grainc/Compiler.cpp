@@ -310,7 +310,7 @@ static bool loadDependencies(
 		{
 			if(!findScript(searchPaths, scriptName, scriptType, filename))
 			{
-				Logger(logStream) << "Cannot find script '" << scriptName << '\'';
+				Logger(logStream) << "Cannot find script: '" << scriptName << '\'';
 				return false;
 			}
 

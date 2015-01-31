@@ -22,7 +22,7 @@ GLuint buff;
 
 bool init(Context& ctx)
 {
-	sysDef = ctx.load("resources/rain", cerr);
+	sysDef = ctx.load("resources/bin/rain", cerr);
 	if(sysDef == NULL) return false;
 
 	sys = sysDef->create(256, 512);

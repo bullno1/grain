@@ -87,15 +87,15 @@ When emitter A requires emitter B, all particle attributes declared in emitter B
 Moreover, emitter B's initialization code will be called before emitter A's.
 Emitter B, in turn, can also require other emitters.
 
-#### Modifier
-A modifier alters a particle's attributes.
+#### Affector
+A affector alters a particle's attributes.
 It is usually done with respect to time.
 
-A modifier can also have modifier-local parameters (declared with `@param`).
-Modifiers can “require” each other.
+A affector can also have affector-local parameters (declared with `@param`).
+Affectors can “require” each other.
 Similar to emitter, all particle attributes and script parameters from the required script will be available and the required code will also be invoked before the requiring code.
 
-In Grain, destructors are modifiers which set the built-in attribute `life` to 0.
+In Grain, destructors are affectors which set the built-in attribute `life` to 0.
 
 #### Renderer
 A render script takes a particle system's attributes and transforms them into OpenGL-specified format.
@@ -232,7 +232,7 @@ The store part is just a reverse process of fetch. Attributes are grouped into 4
 
 Since render scripts do not render dead (`life <= 0`) particles, merely set the status of a dead particle to "alive" (`life > 0`) and move it back to the emission point creates the illusion of a new particle being created.
 
-An emitter script is very similar to a modifier script.
+An emitter script is very similar to a affector script.
 It is invoked on every single particle every frame.
 However, it does not immediately store the newly calculated attributes to the output textures.
 Two criteria need to be met:

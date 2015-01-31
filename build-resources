@@ -1,5 +1,0 @@
-#!/bin/sh
-
-cd resources
-../.build/bin/grainc -o geyser geyser.affector geyser.emitter point.vsh point.fsh
-../.build/bin/grainc -o rain geyser.affector circle_deflector.affector line.emitter point.vsh point.fsh
