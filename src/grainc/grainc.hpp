@@ -1,18 +1,27 @@
 #ifndef GRAINC_COMPILER_HPP
 #define GRAINC_COMPILER_HPP
 
-#include <set>
-#include <vector>
-#include <string>
+struct Compiler;
 
-struct CompileOptions
+struct CompileTask;
+
+class ILogStream
 {
-	bool mOptimize;
-	std::string mOutput;
-	std::vector<std::string> mInputs;
-	std::vector<std::string> mIncludePaths;
+public:
+	virtual void write(const char* msg) = 0;
 };
 
-int compile(const CompileOptions& opts);
+Compiler* createCompiler(ILogStream* logStream);
+void destroyCompiler(Compiler* compiler);
+
+bool compile(Compiler* compiler, CompileTask* task);
+
+CompileTask* createCompileTask();
+void destroyCompileTask(CompileTask* task);
+
+void setOptimize(CompileTask* task, bool optimize);
+void setOutput(CompileTask* task, const char* filename);
+void addInput(CompileTask* task, const char* filename);
+void addIncludePath(CompileTask* task, const char* path);
 
 #endif

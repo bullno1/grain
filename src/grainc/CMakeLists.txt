@@ -5,7 +5,11 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-Os")#-O2 leads to segfault
 
 set(SRC
 	main.cpp
-	grainc.cpp
+	DataType.cpp
+	ScriptType.cpp
+	Script.cpp
+	Compiler.cpp
+	CompileTask.cpp
 )
 
 set(GENERATED_SRC
