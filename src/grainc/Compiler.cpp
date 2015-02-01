@@ -12,6 +12,9 @@
 
 using namespace std;
 
+extern "C" const char builtins[];
+extern "C" const size_t builtins_len;
+
 namespace
 {
 
@@ -57,7 +60,14 @@ struct CompileContext
 		:mCompiler(*compiler)
 		,mCompileTask(*compileTask)
 		,mDeclHelper(mAttributes)
-	{}
+	{
+		stringstream ss;
+		ss.write(builtins, builtins_len);
+		unsigned int lineCount = 0;
+		string line;
+		while(getline(ss, line)) { ++lineCount; };
+		mBuiltInStartLine = mSourceMap.addMapping("<builtins.glsl>", 1, lineCount);
+	}
 
 	typedef map<string, size_t> AttibuteMap;
 
@@ -67,6 +77,7 @@ struct CompileContext
 	AttibuteMap mAttributeMap;
 	Declarations mAttributes;
 	DeclarationHelper mDeclHelper;
+	unsigned int mBuiltInStartLine;
 	string mDeclParamList;
 	string mInvokeParamList;
 	string mSamplerDeclarations;
@@ -77,9 +88,6 @@ struct CompileContext
 const char gFieldNames[] = { 'x', 'y', 'z', 'w' };
 
 }
-
-extern "C" const char builtins[];
-extern "C" const size_t builtins_len;
 
 struct Compiler
 {
@@ -665,6 +673,9 @@ static bool linkModifier(
 	code += script.mCustomDeclarations;
 
 	// add builtin functions
+	code += "#line ";
+	code += str(ctx.mBuiltInStartLine);
+	code += '\n';
 	code.append(builtins, builtins_len);
 
 	// add dependencies
