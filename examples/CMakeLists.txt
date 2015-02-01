@@ -35,3 +35,9 @@ add_demo(rain
 	${RES_SRC_DIR}/point.vsh
 	${RES_SRC_DIR}/point.fsh
 )
+
+add_demo(random
+	${RES_SRC_DIR}/box.emitter
+	${RES_SRC_DIR}/point.vsh
+	${RES_SRC_DIR}/point.fsh
+)
