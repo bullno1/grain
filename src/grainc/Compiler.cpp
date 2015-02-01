@@ -53,9 +53,14 @@ string str(size_t num)
 
 struct CompileContext
 {
-	CompileContext(const Script::Declarations& sysAttrs)
-		:mAttributes(sysAttrs)
+	CompileContext(const Compiler* compiler, const CompileTask* compileTask)
+		:mCompiler(*compiler)
+		,mCompileTask(*compileTask)
+	{}
+
+	void setSystemAttributes(const Script::Declarations& sysAttrs)
 	{
+		mAttributes = sysAttrs;
 		mDeclParamList = "(inout int _count";
 		mInvokeParamList = "(_count";
 		size_t numFloats = 0;
@@ -95,6 +100,9 @@ struct CompileContext
 
 	typedef map<string, size_t> AttibuteMap;
 
+	SourceMap mSourceMap;
+	const Compiler& mCompiler;
+	const CompileTask& mCompileTask;
 	AttibuteMap mAttributeMap;
 	Script::Declarations mAttributes;
 	string mDeclParamList;
@@ -137,23 +145,23 @@ struct CompilerImpl
 
 static bool compile(Compiler* compiler, CompileTask* task)
 {
-	size_t numScripts = task->mInputs.size();
+	CompileContext compileCtx(compiler, task);
 	ILogStream* logStream = compiler->mLogStream;
 	vector<Script*> rootScripts;
-	SourceMap sourceMap;
 	ScriptCache emitterCache;
 	ScriptCache affectorCache;
 	ScriptCache vshCache;
 	ScriptCache fshCache;
 	string scriptName;
-	ScriptType::Enum scriptType;
 
 	//load all scripts
 	string filename;
+	size_t numScripts = task->mInputs.size();
 	for(size_t i = 0; i < numScripts; ++i)
 	{
 		filename = task->mInputs[i];
 
+		ScriptType::Enum scriptType;
 		if(!Script::parseFilename(filename, scriptName, scriptType))
 		{
 			Logger(logStream) << "Can't determine script type of '" << filename << '\'';
@@ -181,18 +189,18 @@ static bool compile(Compiler* compiler, CompileTask* task)
 		if(!script.read(filename, logStream)) { return false; }
 
 		script.mGeneratedCodeStartLine =
-			sourceMap.addMapping(filename, script.mFirstBodyLine, script.mNumBodyLines);
+			compileCtx.mSourceMap.addMapping(filename, script.mFirstBodyLine, script.mNumBodyLines);
 		script.mType = scriptType;
 		script.mName = scriptName;
 		rootScripts.push_back(&script);
 	}
 
-	if(!loadDependencies(sourceMap, emitterCache, ScriptType::Emitter, task->mIncludePaths, logStream))
+	if(!loadDependencies(compileCtx, emitterCache, ScriptType::Emitter))
 	{
 		return false;
 	}
 
-	if(!loadDependencies(sourceMap, affectorCache, ScriptType::Affector, task->mIncludePaths, logStream))
+	if(!loadDependencies(compileCtx, affectorCache, ScriptType::Affector))
 	{
 		return false;
 	}
@@ -206,14 +214,14 @@ static bool compile(Compiler* compiler, CompileTask* task)
 	}
 	sysAttrs.insert(make_pair("life", DataType::Float));//life is a built-in attribute
 
-	CompileContext compileContext(sysAttrs);
+	compileCtx.setSystemAttributes(sysAttrs);
 
 	// Compile all scripts
 	bool compileResult =
-		   compileModifiers(compileContext, emitterCache, logStream)
-		&& compileModifiers(compileContext, affectorCache, logStream)
-		&& compileRenderShaders(compileContext, vshCache, logStream)
-		&& compileRenderShaders(compileContext, fshCache, logStream);
+		   compileModifiers(compileCtx, emitterCache)
+		&& compileModifiers(compileCtx, affectorCache)
+		&& compileRenderShaders(compileCtx, vshCache)
+		&& compileRenderShaders(compileCtx, fshCache);
 
 	if(!compileResult) { return false; }
 
@@ -243,17 +251,20 @@ static bool compile(Compiler* compiler, CompileTask* task)
 				break;
 		}
 
+		bool success;
 		switch(script.mType)
 		{
 			case ScriptType::Emitter:
 			case ScriptType::Affector:
-				linkModifiers(compileContext, script, *cache, code);
+				success = linkModifier(compileCtx, script, *cache, code);
 				break;
 			case ScriptType::VertexShader:
 			case ScriptType::FragmentShader:
-				linkRenderShaders(compileContext, script, code);
+				success = linkRenderShader(compileCtx, script, code);
 				break;
 		}
+
+		if(!success) { return false; }
 
 		bool isVertexShader = script.mType == ScriptType::VertexShader;
 		glslopt_shader* shader = glslopt_optimize(compiler->mGlslOptCtx, isVertexShader ? kGlslOptShaderVertex : kGlslOptShaderFragment, code.c_str(), 0);
@@ -278,11 +289,11 @@ static bool compile(Compiler* compiler, CompileTask* task)
 			}
 			output << endl;
 			output << (task->mOptimize ? glslopt_get_output(shader) : code.c_str());
-			dumpLog(logStream, sourceMap, glslopt_get_log(shader));
+			dumpLog(compileCtx, glslopt_get_log(shader));
 		}
 		else
 		{
-			dumpLog(logStream, sourceMap, glslopt_get_log(shader));
+			dumpLog(compileCtx, glslopt_get_log(shader));
 			return false;
 		}
 
@@ -295,18 +306,16 @@ static bool compile(Compiler* compiler, CompileTask* task)
 		Logger(logStream) << "Can't open '" << task->mOutput << "' for writing";
 		return false;
 	}
-	outFile << compileContext.mNumTextures << endl
+	outFile << compileCtx.mNumTextures << endl
 	        << output.str() << endl;
 
 	return true;
 }
 
 static bool loadDependencies(
-	SourceMap& sourceMap,
+	CompileContext& ctx,
 	ScriptCache& cache,
-	ScriptType::Enum scriptType,
-	const vector<const char*>& searchPaths,
-	ILogStream* logStream
+	ScriptType::Enum scriptType
 )
 {
 	vector<string> pendingScripts;
@@ -326,17 +335,17 @@ static bool loadDependencies(
 		const Script* script;
 		if(itr == cache.end())//script is not loaded
 		{
-			if(!findScript(searchPaths, scriptName, scriptType, filename))
+			if(!findScript(ctx.mCompileTask.mIncludePaths, scriptName, scriptType, filename))
 			{
-				Logger(logStream) << "Cannot find script: '" << scriptName << '\'';
+				Logger(ctx.mCompiler.mLogStream) << "Cannot find script: '" << scriptName << '\'';
 				return false;
 			}
 
 			Script* newScript = &cache[scriptName];
-			if(!newScript->read(filename, logStream)) { return false; }
+			if(!newScript->read(filename, ctx.mCompiler.mLogStream)) { return false; }
 
 			newScript->mGeneratedCodeStartLine =
-				sourceMap.addMapping(
+				ctx.mSourceMap.addMapping(
 					filename,
 					newScript->mFirstBodyLine,
 					newScript->mNumBodyLines
@@ -427,11 +436,9 @@ static bool collectAttributes(Script::Declarations& sysAttrs, ScriptCache& cache
 	return true;
 }
 
-// TODO: syntax check
 static bool compileModifiers(
 	const CompileContext& ctx,
-	ScriptCache& cache,
-	ILogStream* logStream
+	ScriptCache& cache
 )
 {
 	for(ScriptCache::iterator itr = cache.begin(); itr != cache.end(); ++itr)
@@ -466,11 +473,9 @@ static bool compileModifiers(
 	return true;
 }
 
-//TODO: syntax check
 static bool compileRenderShaders(
 	const CompileContext& ctx,
-	ScriptCache& cache,
-	ILogStream* logStream
+	ScriptCache& cache
 )
 {
 	for(ScriptCache::iterator itr = cache.begin(); itr != cache.end(); ++itr)
@@ -549,7 +554,7 @@ static void generateFetch(const CompileContext& ctx, const Script& script, strin
 	}
 }
 
-static void linkModifiers(
+static bool linkModifier(
 	const CompileContext& ctx,
 	const Script& script,
 	const ScriptCache& cache,
@@ -598,6 +603,18 @@ static void linkModifiers(
 	{
 		code += (*itr)->mGeneratedCode;
 		code += '\n';
+
+		// Check for syntax error after every dependencies to prevent errors
+		// from overflowing to next script
+		if(!syntaxCheck(
+			ctx,
+			code,
+			kGlslOptShaderFragment,
+			kGlslOptionNotFullShader,
+			*itr))
+		{
+			return false;
+		}
 	}
 
 	// create main function
@@ -676,6 +693,8 @@ static void linkModifiers(
 	}
 
 	code += "}\n";
+
+	return true;
 }
 
 static void collectDependencies(
@@ -701,7 +720,7 @@ static void collectDependencies(
 	sortedDeps.push_back(&script);
 }
 
-static void linkRenderShaders(
+static bool linkRenderShader(
 	const CompileContext& ctx,
 	const Script& script,
 	std::string& code
@@ -713,9 +732,11 @@ static void linkRenderShaders(
 	code += ctx.mSamplerDeclarations;
 	code += script.mCustomDeclarations;
 	code += script.mGeneratedCode;
+
+	return true;
 }
 
-static void dumpLog(ILogStream* logStream, const SourceMap& sourceMap, const char* log)
+static void dumpLog(const CompileContext& ctx, const char* log, const Script* bottomScript = NULL)
 {
 	stringstream originalLog(log);
 	string line;
@@ -737,6 +758,16 @@ static void dumpLog(ILogStream* logStream, const SourceMap& sourceMap, const cha
 					line.substr(leftParenPos + 1, commaPos - leftParenPos - 1)
 				);
 
+			// prevent line from flowing over bottom script
+			if(bottomScript != NULL)
+			{
+				unsigned int maxLine =
+					bottomScript->mGeneratedCodeStartLine +
+					bottomScript->mNumBodyLines;
+
+				lineNumber = lineNumber > maxLine ? maxLine : lineNumber;
+			}
+
 			unsigned int columnNumber =
 				lexical_cast<unsigned int>(
 					line.substr(commaPos + 1, rightParenPos - commaPos - 1)
@@ -745,9 +776,9 @@ static void dumpLog(ILogStream* logStream, const SourceMap& sourceMap, const cha
 			string message = line.substr(colonPos + 1, line.length() - colonPos);
 
 			unsigned int originalLine = 0;
-			sourceMap.lookup(lineNumber, filename, originalLine);
+			ctx.mSourceMap.lookup(lineNumber, filename, originalLine);
 
-			Logger(logStream)
+			Logger(ctx.mCompiler.mLogStream)
 				<< filename
 				<< ':' << originalLine
 				<< ':' << columnNumber
@@ -755,9 +786,34 @@ static void dumpLog(ILogStream* logStream, const SourceMap& sourceMap, const cha
 		}
 		else
 		{
-			Logger(logStream) << line;
+			Logger(ctx.mCompiler.mLogStream) << line;
 		}
 	}
+}
+
+static bool syntaxCheck(
+	const CompileContext& ctx,
+	const string& code,
+	glslopt_shader_type shaderType,
+	unsigned int options,
+	const Script* bottomScript
+)
+{
+	glslopt_shader* shader =
+		glslopt_optimize(
+			ctx.mCompiler.mGlslOptCtx,
+			shaderType,
+			code.c_str(),
+			options
+		);
+	bool status = glslopt_get_status(shader);
+	if(!status)
+	{
+		dumpLog(ctx, glslopt_get_log(shader), bottomScript);
+	}
+	glslopt_shader_delete(shader);
+
+	return status;
 }
 
 };
