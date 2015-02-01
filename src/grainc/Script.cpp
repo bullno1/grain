@@ -13,18 +13,19 @@ bool Script::read(const std::string& filename, ILogStream* logStream)
 		return false;
 	}
 
+	mFilename = filename;
 	mBody.clear();
 	mAttributes.clear();
 	mParams.clear();
 	mDependencies.clear();
 	mCustomDeclarations.clear();
+	mNumBodyLines = 0;
 
 	string line;
 	string token;
 	stringstream ss;
 	vector<string> tokens;
 	unsigned int lineCount = 0;
-	unsigned int firstBodyLine = 0;
 
 	while(getline(input, line))
 	{
@@ -39,13 +40,9 @@ bool Script::read(const std::string& filename, ILogStream* logStream)
 			tokens.push_back(token);
 		}
 
-		string& firstTok = tokens[0];
-		if(tokens.empty())
-		{
-			mBody += '\n';
-			continue;
-		}
+		if(tokens.empty()) { continue; }
 
+		string& firstTok = tokens[0];
 		if(firstTok == "@param")
 		{
 			DataType::Enum paramType;
@@ -86,19 +83,31 @@ bool Script::read(const std::string& filename, ILogStream* logStream)
 			mCustomDeclarations += line.substr(9, line.length() - 9);
 			mCustomDeclarations += '\n';
 		}
-		else
+		else // reached body
 		{
-			if(mFirstBodyLine == 0)
-			{
-				mFirstBodyLine = lineCount;
-			}
-
+			mFirstBodyLine = lineCount;
 			mBody += line;
 			mBody += "\n";
+			++mNumBodyLines;
+			break;
 		}
 	}
 
-	mFilename = filename;
+	if(mNumBodyLines != 0) // reached body before EOF
+	{
+		while(getline(input, line))
+		{
+			mBody += line;
+			mBody += "\n";
+			++mNumBodyLines;
+		}
+	}
+	else
+	{
+		mFirstBodyLine = 1;
+		mNumBodyLines = 0;
+	}
+
 	return true;
 }
 

@@ -7,6 +7,7 @@
 #include "grainc.hpp"
 #include "CompileTask.hpp"
 #include "Script.hpp"
+#include "SourceMap.hpp"
 #include "Logger.hpp"
 
 using namespace std;
@@ -32,6 +33,16 @@ private:
 Ostream gCerr(cerr);
 
 typedef map<string, Script> ScriptCache;
+
+template<typename TargetType, typename SourceType>
+TargetType lexical_cast(const SourceType& source)
+{
+	stringstream ss;
+	ss << source;
+	TargetType result;
+	ss >> result;
+	return result;
+}
 
 string str(size_t num)
 {
@@ -129,6 +140,7 @@ static bool compile(Compiler* compiler, CompileTask* task)
 	size_t numScripts = task->mInputs.size();
 	ILogStream* logStream = compiler->mLogStream;
 	vector<Script*> rootScripts;
+	SourceMap sourceMap;
 	ScriptCache emitterCache;
 	ScriptCache affectorCache;
 	ScriptCache vshCache;
@@ -168,17 +180,19 @@ static bool compile(Compiler* compiler, CompileTask* task)
 		Script& script = (*cache)[scriptName];
 		if(!script.read(filename, logStream)) { return false; }
 
+		script.mGeneratedCodeStartLine =
+			sourceMap.addMapping(filename, script.mFirstBodyLine, script.mNumBodyLines);
 		script.mType = scriptType;
 		script.mName = scriptName;
 		rootScripts.push_back(&script);
 	}
 
-	if(!loadDependencies(emitterCache, ScriptType::Emitter, task->mIncludePaths, logStream))
+	if(!loadDependencies(sourceMap, emitterCache, ScriptType::Emitter, task->mIncludePaths, logStream))
 	{
 		return false;
 	}
 
-	if(!loadDependencies(affectorCache, ScriptType::Affector, task->mIncludePaths, logStream))
+	if(!loadDependencies(sourceMap, affectorCache, ScriptType::Affector, task->mIncludePaths, logStream))
 	{
 		return false;
 	}
@@ -203,16 +217,9 @@ static bool compile(Compiler* compiler, CompileTask* task)
 
 	if(!compileResult) { return false; }
 
-	ofstream outFile(task->mOutput);
-	if(!outFile.good())
-	{
-		Logger(logStream) << "Can't open '" << task->mOutput << "' for writing";
-		return false;
-	}
-	outFile << compileContext.mNumTextures << endl;
-
 	// Link scripts
 	string code;
+	stringstream output;
 
 	for(size_t i = 0; i < numScripts; ++i)
 	{
@@ -253,38 +260,49 @@ static bool compile(Compiler* compiler, CompileTask* task)
 		bool status = glslopt_get_status(shader);
 		if(status)
 		{
-			outFile << "@" << script.mName;
+			output << "@" << script.mName;
 			switch(script.mType)
 			{
 				case ScriptType::Emitter:
-					outFile << ".emitter";
+					output << ".emitter";
 					break;
 				case ScriptType::Affector:
-					outFile << ".affector";
+					output << ".affector";
 					break;
 				case ScriptType::VertexShader:
-					outFile << ".vsh";
+					output << ".vsh";
 					break;
 				case ScriptType::FragmentShader:
-					outFile << ".fsh";
+					output << ".fsh";
 					break;
 			}
-			outFile << endl;
-			outFile << (task->mOptimize ? glslopt_get_output(shader) : code.c_str());
+			output << endl;
+			output << (task->mOptimize ? glslopt_get_output(shader) : code.c_str());
+			dumpLog(logStream, sourceMap, glslopt_get_log(shader));
 		}
 		else
 		{
-			Logger(logStream) << glslopt_get_log(shader);
+			dumpLog(logStream, sourceMap, glslopt_get_log(shader));
 			return false;
 		}
 
 		glslopt_shader_delete(shader);
 	}
 
+	ofstream outFile(task->mOutput);
+	if(!outFile.good())
+	{
+		Logger(logStream) << "Can't open '" << task->mOutput << "' for writing";
+		return false;
+	}
+	outFile << compileContext.mNumTextures << endl
+	        << output.str() << endl;
+
 	return true;
 }
 
 static bool loadDependencies(
+	SourceMap& sourceMap,
 	ScriptCache& cache,
 	ScriptType::Enum scriptType,
 	const vector<const char*>& searchPaths,
@@ -317,6 +335,12 @@ static bool loadDependencies(
 			Script* newScript = &cache[scriptName];
 			if(!newScript->read(filename, logStream)) { return false; }
 
+			newScript->mGeneratedCodeStartLine =
+				sourceMap.addMapping(
+					filename,
+					newScript->mFirstBodyLine,
+					newScript->mNumBodyLines
+				);
 			newScript->mType = scriptType;
 			newScript->mName = scriptName;
 		}
@@ -403,6 +427,7 @@ static bool collectAttributes(Script::Declarations& sysAttrs, ScriptCache& cache
 	return true;
 }
 
+// TODO: syntax check
 static bool compileModifiers(
 	const CompileContext& ctx,
 	ScriptCache& cache,
@@ -430,7 +455,9 @@ static bool compileModifiers(
 		}
 
 		// add own code
-		// TODO: #line
+		code += "#line ";
+		code += str(script.mGeneratedCodeStartLine);
+		code += '\n';
 		code += script.mBody;
 
 		code += "\n}\n";
@@ -439,6 +466,7 @@ static bool compileModifiers(
 	return true;
 }
 
+//TODO: syntax check
 static bool compileRenderShaders(
 	const CompileContext& ctx,
 	ScriptCache& cache,
@@ -536,7 +564,7 @@ static void linkModifiers(
 	code += ctx.mSamplerDeclarations;
 	code += ctx.mOutputDeclarations;
 
-	// gather dependencies
+	// sort dependencies
 	vector<const Script*> deps;
 	collectDependencies(script, deps, cache);
 
@@ -685,6 +713,51 @@ static void linkRenderShaders(
 	code += ctx.mSamplerDeclarations;
 	code += script.mCustomDeclarations;
 	code += script.mGeneratedCode;
+}
+
+static void dumpLog(ILogStream* logStream, const SourceMap& sourceMap, const char* log)
+{
+	stringstream originalLog(log);
+	string line;
+	string filename;
+	while(getline(originalLog, line))
+	{
+		string::size_type leftParenPos = line.find_first_of('(');
+		string::size_type commaPos = line.find_first_of(',');
+		string::size_type rightParenPos = line.find_first_of(')');
+		string::size_type colonPos = line.find_first_of(':');
+
+		if(leftParenPos < commaPos
+			&& commaPos < rightParenPos
+			&& rightParenPos < colonPos)
+		{
+			// remap lines
+			unsigned int lineNumber =
+				lexical_cast<unsigned int>(
+					line.substr(leftParenPos + 1, commaPos - leftParenPos - 1)
+				);
+
+			unsigned int columnNumber =
+				lexical_cast<unsigned int>(
+					line.substr(commaPos + 1, rightParenPos - commaPos - 1)
+				);
+
+			string message = line.substr(colonPos + 1, line.length() - colonPos);
+
+			unsigned int originalLine = 0;
+			sourceMap.lookup(lineNumber, filename, originalLine);
+
+			Logger(logStream)
+				<< filename
+				<< ':' << originalLine
+				<< ':' << columnNumber
+				<< ':' << message;
+		}
+		else
+		{
+			Logger(logStream) << line;
+		}
+	}
 }
 
 };

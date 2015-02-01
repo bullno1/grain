@@ -10,6 +10,7 @@ set(SRC
 	Script.cpp
 	Compiler.cpp
 	CompileTask.cpp
+	SourceMap.cpp
 )
 
 set(GENERATED_SRC

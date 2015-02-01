@@ -22,6 +22,8 @@ struct Script
 	std::string mBody;
 	std::vector<std::string> mDependencies;
 	unsigned int mFirstBodyLine;
+	unsigned int mNumBodyLines;
+	unsigned int mGeneratedCodeStartLine;
 	std::string mGeneratedCode;
 
 	bool read(const std::string& filename, ILogStream* logStream);

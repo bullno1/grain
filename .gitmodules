@@ -1,3 +1,3 @@
 [submodule "deps/glsl-optimizer"]
 	path = deps/glsl-optimizer
-	url = git://github.com/aras-p/glsl-optimizer
+	url = git://github.com/bullno1/glsl-optimizer
