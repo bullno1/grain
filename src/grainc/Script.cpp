@@ -15,11 +15,11 @@ bool Script::read(const std::string& filename, ILogStream* logStream)
 
 	mFilename = filename;
 	mBody.clear();
-	mAttributes.clear();
-	mParams.clear();
+	mDeclarations.clear();
 	mDependencies.clear();
 	mCustomDeclarations.clear();
 	mNumBodyLines = 0;
+	DeclarationHelper declHelper(mDeclarations);
 
 	string line;
 	string token;
@@ -43,33 +43,39 @@ bool Script::read(const std::string& filename, ILogStream* logStream)
 		if(tokens.empty()) { continue; }
 
 		string& firstTok = tokens[0];
-		if(firstTok == "@param")
+		if(firstTok == "@param" || firstTok == "@attribute")
 		{
-			DataType::Enum paramType;
-			if(DataType::parse(tokens[1], paramType))
-			{
-				//TODO: handle duplicates
-				mParams.insert(make_pair(tokens[2], paramType));
-			}
-			else
+			DeclarationType::Enum declType = firstTok == "@param" ? DeclarationType::Param : DeclarationType::Attribute;
+			const string& declName = tokens[2];
+			const string& typeName = tokens[1];
+
+			DataType::Enum dataType;
+			if(!DataType::parse(typeName, dataType))
 			{
 				Logger(logStream)
-					<< filename << "(" << lineCount << "): " << "Invalid type '" << tokens[1] << "'";
+					<< filename
+					<< ':' << line
+					<< "Invalid type '" << typeName << "'";
 				return false;
 			}
-		}
-		else if(firstTok == "@attribute")
-		{
-			DataType::Enum paramType;
-			if(DataType::parse(tokens[1], paramType))
-			{
-				//TODO: handle duplicates
-				mAttributes.insert(make_pair(tokens[2], paramType));
-			}
-			else
+
+			const Declaration* conflictedDecl;
+			if(!declHelper.declare(
+					declName,
+					declType,
+					dataType,
+					lineCount,
+					filename,
+					false,
+					NULL,
+					&conflictedDecl
+				))
 			{
 				Logger(logStream)
-					<< filename << "(" << lineCount << "): " << "Invalid type '" << tokens[1] << "'";
+					<< filename
+					<< ':' << lineCount
+					<< ':' << "Redeclaration of '" << declName << "'"
+					<< " (previously found at line " << conflictedDecl->mLine << ')';
 				return false;
 			}
 		}

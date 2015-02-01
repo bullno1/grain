@@ -11,6 +11,7 @@ set(SRC
 	Compiler.cpp
 	CompileTask.cpp
 	SourceMap.cpp
+	Declaration.cpp
 )
 
 set(GENERATED_SRC

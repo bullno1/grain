@@ -56,47 +56,8 @@ struct CompileContext
 	CompileContext(const Compiler* compiler, const CompileTask* compileTask)
 		:mCompiler(*compiler)
 		,mCompileTask(*compileTask)
+		,mDeclHelper(mAttributes)
 	{}
-
-	void setSystemAttributes(const Script::Declarations& sysAttrs)
-	{
-		mAttributes = sysAttrs;
-		mDeclParamList = "(inout int _count";
-		mInvokeParamList = "(_count";
-		size_t numFloats = 0;
-
-		for(Script::Declarations::const_iterator itr = sysAttrs.begin(); itr != sysAttrs.end(); ++itr)
-		{
-			// calculate attributes' locations
-			mAttributeMap.insert(make_pair(itr->first, numFloats));
-			numFloats += DataType::size(itr->second);
-
-			// generate parameter list
-			mDeclParamList += ", inout ";
-			mDeclParamList += DataType::name(itr->second);
-			mDeclParamList += ' ';
-			mDeclParamList += itr->first;
-
-			mInvokeParamList += ", ";
-			mInvokeParamList += itr->first;
-		}
-
-		mDeclParamList += ')';
-		mInvokeParamList += ')';
-
-		// generate sampler declarations
-		mNumTextures = (numFloats + 3) / 4;//a texel has 4 fields: a, r, g, b
-		for(size_t i = 0; i < mNumTextures; ++i)
-		{
-			mSamplerDeclarations += "uniform sampler2D _tex";
-			mSamplerDeclarations += str(i);
-			mSamplerDeclarations += ";\n";
-
-			mOutputDeclarations += "out vec4 out";
-			mOutputDeclarations += str(i);
-			mOutputDeclarations += ";\n";
-		}
-	}
 
 	typedef map<string, size_t> AttibuteMap;
 
@@ -104,7 +65,8 @@ struct CompileContext
 	const Compiler& mCompiler;
 	const CompileTask& mCompileTask;
 	AttibuteMap mAttributeMap;
-	Script::Declarations mAttributes;
+	Declarations mAttributes;
+	DeclarationHelper mDeclHelper;
 	string mDeclParamList;
 	string mInvokeParamList;
 	string mSamplerDeclarations;
@@ -195,35 +157,74 @@ static bool compile(Compiler* compiler, CompileTask* task)
 		rootScripts.push_back(&script);
 	}
 
-	if(!loadDependencies(compileCtx, emitterCache, ScriptType::Emitter))
-	{
-		return false;
-	}
-
-	if(!loadDependencies(compileCtx, affectorCache, ScriptType::Affector))
+	if(!loadDependencies(compileCtx, emitterCache, ScriptType::Emitter)
+	|| !loadDependencies(compileCtx, affectorCache, ScriptType::Affector))
 	{
 		return false;
 	}
 
 	// Determine the common set of attributes
-	Script::Declarations sysAttrs;
-	if(!(collectAttributes(sysAttrs, emitterCache, logStream)
-	     && collectAttributes(sysAttrs, affectorCache, logStream)))
+	compileCtx.mDeclHelper.declare(
+		"life",
+		DeclarationType::Attribute,
+		DataType::Float,
+		1,
+		"<built-in>",
+		false
+	);
+	if(!collectAttributes(compileCtx, emitterCache)
+	|| !collectAttributes(compileCtx, affectorCache))
 	{
 		return false;
 	}
-	sysAttrs.insert(make_pair("life", DataType::Float));//life is a built-in attribute
 
-	compileCtx.setSystemAttributes(sysAttrs);
+	// Compute common code fragments
+	compileCtx.mDeclParamList = "(inout int _count";
+	compileCtx.mInvokeParamList = "(_count";
+	size_t numFloats = 0;
+
+	for(Declarations::const_iterator itr = compileCtx.mAttributes.begin()
+	;   itr != compileCtx.mAttributes.end()
+	;   ++itr)
+	{
+		// calculate attributes' locations
+		compileCtx.mAttributeMap.insert(make_pair(itr->first, numFloats));
+		numFloats += DataType::size(itr->second.mDataType);
+
+		// generate parameter list
+		compileCtx.mDeclParamList += ", inout ";
+		compileCtx.mDeclParamList += DataType::name(itr->second.mDataType);
+		compileCtx.mDeclParamList += ' ';
+		compileCtx.mDeclParamList += itr->first;
+
+		compileCtx.mInvokeParamList += ", ";
+		compileCtx.mInvokeParamList += itr->first;
+	}
+
+	compileCtx.mDeclParamList += ')';
+	compileCtx.mInvokeParamList += ')';
+
+	// generate sampler declarations
+	compileCtx.mNumTextures = (numFloats + 3) / 4;//a texel has 4 fields: a, r, g, b
+	for(size_t i = 0; i < compileCtx.mNumTextures; ++i)
+	{
+		compileCtx.mSamplerDeclarations += "uniform sampler2D _tex";
+		compileCtx.mSamplerDeclarations += str(i);
+		compileCtx.mSamplerDeclarations += ";\n";
+
+		compileCtx.mOutputDeclarations += "out vec4 out";
+		compileCtx.mOutputDeclarations += str(i);
+		compileCtx.mOutputDeclarations += ";\n";
+	}
 
 	// Compile all scripts
-	bool compileResult =
-		   compileModifiers(compileCtx, emitterCache)
-		&& compileModifiers(compileCtx, affectorCache)
-		&& compileRenderShaders(compileCtx, vshCache)
-		&& compileRenderShaders(compileCtx, fshCache);
-
-	if(!compileResult) { return false; }
+	if(!compileModifiers(compileCtx, emitterCache)
+	|| !compileModifiers(compileCtx, affectorCache)
+	|| !compileRenderShaders(compileCtx, vshCache)
+	|| !compileRenderShaders(compileCtx, fshCache))
+	{
+		return false;
+	}
 
 	// Link scripts
 	string code;
@@ -267,7 +268,12 @@ static bool compile(Compiler* compiler, CompileTask* task)
 		if(!success) { return false; }
 
 		bool isVertexShader = script.mType == ScriptType::VertexShader;
-		glslopt_shader* shader = glslopt_optimize(compiler->mGlslOptCtx, isVertexShader ? kGlslOptShaderVertex : kGlslOptShaderFragment, code.c_str(), 0);
+		glslopt_shader* shader = glslopt_optimize(
+			compiler->mGlslOptCtx,
+			isVertexShader ? kGlslOptShaderVertex : kGlslOptShaderFragment,
+			code.c_str(),
+			0
+		);
 		bool status = glslopt_get_status(shader);
 		if(status)
 		{
@@ -300,6 +306,7 @@ static bool compile(Compiler* compiler, CompileTask* task)
 		glslopt_shader_delete(shader);
 	}
 
+	// Write final result
 	ofstream outFile(task->mOutput);
 	if(!outFile.good())
 	{
@@ -421,15 +428,44 @@ static bool fileExists(const string& filename)
 	return file.good();
 }
 
-//TODO: handle conflicts
-static bool collectAttributes(Script::Declarations& sysAttrs, ScriptCache& cache, ILogStream* logStream)
+static bool collectAttributes(CompileContext& ctx, ScriptCache& cache)
 {
-	for(ScriptCache::const_iterator itr = cache.begin(); itr != cache.end(); ++itr)
+	for(ScriptCache::const_iterator scriptItr = cache.begin()
+	;   scriptItr != cache.end()
+	;   ++scriptItr)
 	{
-		const Script::Declarations& attributes = itr->second.mAttributes;
-		for(Script::Declarations::const_iterator itr2 = attributes.begin(); itr2 != attributes.end(); ++itr2)
+		const Declarations& declarations = scriptItr->second.mDeclarations;
+		for(Declarations::const_iterator declItr = declarations.begin()
+		;   declItr != declarations.end()
+		;   ++declItr)
 		{
-			sysAttrs.insert(make_pair(itr2->first, itr2->second));
+			//Ignore params
+			if(declItr->second.mDeclType != DeclarationType::Attribute)
+			{
+				continue;
+			}
+
+			const string* conflictedFile;
+			const Declaration* conflictedDecl;
+			const Declaration& declaration = declItr->second;
+			if(!ctx.mDeclHelper.declare(
+				declItr->first,
+				declaration,
+				scriptItr->second.mFilename,
+				true,
+				&conflictedFile,
+				&conflictedDecl
+			))
+			{
+				Logger(ctx.mCompiler.mLogStream)
+					<< scriptItr->second.mFilename
+					<< ':' << declaration.mLine
+					<< ": This declaration of '" << declItr->first << '\''
+					<< " conflicts with a previous one"
+					<< " (found at " << *conflictedFile <<
+					':' << conflictedDecl->mLine << ')';
+				return false;
+			}
 		}
 	}
 
@@ -520,9 +556,9 @@ static void generateFetch(const CompileContext& ctx, const Script& script, strin
 	}
 
 	string prefix = isEmitter ? "previous_" : "";
-	for(Script::Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
+	for(Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
 	{
-		DataType::Enum attrType = itr->second;
+		DataType::Enum attrType = itr->second.mDataType;
 		code += DataType::name(attrType);
 		code += ' ';
 		code += prefix;
@@ -574,19 +610,52 @@ static bool linkModifier(
 	collectDependencies(script, deps, cache);
 
 	// generate uniform declarations
-	// TODO: check for conflicts
-	Script::Declarations uniforms;
+	Declarations uniforms;
+	DeclarationHelper declHelper(uniforms);
+	declHelper.copy(ctx.mDeclHelper);
 
-	for(vector<const Script*>::const_iterator itr = deps.begin(); itr != deps.end(); ++itr)
+	for(vector<const Script*>::const_iterator scriptItr = deps.begin()
+	;   scriptItr != deps.end()
+	;   ++scriptItr)
 	{
-		const Script::Declarations& params = (*itr)->mParams;
-		uniforms.insert(params.begin(), params.end());
+		const Declarations& declarations = (*scriptItr)->mDeclarations;
+		for(Declarations::const_iterator declItr = declarations.begin()
+		;   declItr != declarations.end()
+		;   ++declItr)
+		{
+			if(declItr->second.mDeclType != DeclarationType::Param) { continue; }
+
+			const string* conflictedFile;
+			const Declaration* conflictedDecl;
+			if(!declHelper.declare(
+				declItr->first,
+				declItr->second,
+				(*scriptItr)->mFilename,
+				false,
+				&conflictedFile,
+				&conflictedDecl
+			))
+			{
+				Logger(ctx.mCompiler.mLogStream)
+					<< (*scriptItr)->mFilename
+					<< ':' << declItr->second.mLine
+					<< ": This declaration of '" << declItr->first << '\''
+					<< " conflicts with a previous one"
+					<< " (found at " << *conflictedFile <<
+					':' << conflictedDecl->mLine << ')';
+				return false;
+			}
+		}
 	}
 
-	for(Script::Declarations::const_iterator itr = uniforms.begin(); itr != uniforms.end(); ++itr)
+	for(Declarations::const_iterator itr = uniforms.begin()
+	;   itr != uniforms.end()
+	;   ++itr)
 	{
+		if(itr->second.mDeclType != DeclarationType::Param) { continue; }
+
 		code += "uniform ";
-		code += DataType::name(itr->second);
+		code += DataType::name(itr->second.mDataType);
 		code += ' ';
 		code += itr->first;
 		code += ";\n";
@@ -628,9 +697,9 @@ static bool linkModifier(
 	if(isEmitter)
 	{
 		// gen temporary vars
-		for(Script::Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
+		for(Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
 		{
-			code += DataType::name(itr->second);
+			code += DataType::name(itr->second.mDataType);
 			code += ' ';
 			code += itr->first;
 			code += ";\n";
@@ -648,7 +717,7 @@ static bool linkModifier(
 		code += "bool canEmit = rand() <= _chance;\n"
 		        "bool dead = previous_life <= 0.0;\n"
 		        "float selected = float(dead && canEmit);\n";
-		for(Script::Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
+		for(Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
 		{
 			code += itr->first;
 			code += " = mix(previous_";
@@ -660,10 +729,10 @@ static bool linkModifier(
 	}
 
 	// store
-	for(Script::Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
+	for(Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
 	{
 		size_t attrLoc = ctx.mAttributeMap.find(itr->first)->second;
-		size_t size = DataType::size(itr->second);
+		size_t size = DataType::size(itr->second.mDataType);
 
 		if(size > 1)
 		{

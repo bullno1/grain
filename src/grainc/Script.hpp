@@ -2,23 +2,20 @@
 #define GRAINC_SCRIPT_HPP
 
 #include <string>
-#include <map>
 #include <vector>
 #include "DataType.hpp"
 #include "ScriptType.hpp"
+#include "Declaration.hpp"
 
 class ILogStream;
 
 struct Script
 {
-	typedef std::map<std::string, DataType::Enum> Declarations;
-
 	ScriptType::Enum mType;
 	std::string mName;
 	std::string mFilename;
 	std::string mCustomDeclarations;
-	Declarations mParams;
-	Declarations mAttributes;
+	Declarations mDeclarations;
 	std::string mBody;
 	std::vector<std::string> mDependencies;
 	unsigned int mFirstBodyLine;
