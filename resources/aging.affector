@@ -1,1 +1,1 @@
-life -= dt;
+particle.life -= dt;

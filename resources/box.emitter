@@ -2,6 +2,7 @@
 @param float height
 @attribute vec2 position
 
-position.x = random_range(-width/2, width/2);
-position.y = random_range(-height/2, height/2);
-life = 1;
+particle.position =
+	vec2(random_range(-width/2, width/2),
+         random_range(-height/2, height/2));
+particle.life = 1;

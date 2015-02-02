@@ -1,4 +1,4 @@
 @param float min_life
 @param float max_life
 
-life = random_range(min_life, max_life);
+particle.life = random_range(min_life, max_life);

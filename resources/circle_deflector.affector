@@ -2,10 +2,10 @@
 @param vec2 center
 @param float radius
 
-vec2 normal = position - center;
+vec2 normal = particle.position - center;
 bool inCircle = length(normal) < radius;
-bool goingIn = dot(normal, velocity) < 0.0;
+bool goingIn = dot(normal, particle.velocity) < 0.0;
 bool bounce = inCircle && goingIn;
-vec2 newV = reflect(velocity, normalize(normal));
-velocity = select(bounce, newV / 3, velocity);
-life = select(bounce, life / 2, life);
+vec2 newV = reflect(particle.velocity, normalize(normal));
+particle.velocity = select(bounce, newV / 3, particle.velocity);
+particle.life = select(bounce, particle.life / 2, particle.life);

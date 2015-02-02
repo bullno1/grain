@@ -76,9 +76,8 @@ struct CompileContext
 	Declarations mAttributes;
 	DeclarationHelper mDeclHelper;
 	unsigned int mBuiltInStartLine;
-	string mDeclParamList;
-	string mInvokeParamList;
 	string mSamplerDeclarations;
+	string mStructDeclaration;
 	string mOutputDeclarations;
 	size_t mNumTextures;
 };
@@ -185,9 +184,8 @@ static bool compile(Compiler* compiler, CompileTask* task)
 	}
 
 	// Compute common code fragments
-	compileCtx.mDeclParamList = "(inout float _gr_seed";
-	compileCtx.mInvokeParamList = "(_gr_seed";
 	size_t numFloats = 0;
+	compileCtx.mStructDeclaration = "struct _gr_particle {\n";
 
 	for(Declarations::const_iterator itr = compileCtx.mAttributes.begin()
 	;   itr != compileCtx.mAttributes.end()
@@ -197,18 +195,15 @@ static bool compile(Compiler* compiler, CompileTask* task)
 		compileCtx.mAttributeMap.insert(make_pair(itr->first, numFloats));
 		numFloats += DataType::size(itr->second.mDataType);
 
-		// generate parameter list
-		compileCtx.mDeclParamList += ", inout ";
-		compileCtx.mDeclParamList += DataType::name(itr->second.mDataType);
-		compileCtx.mDeclParamList += ' ';
-		compileCtx.mDeclParamList += itr->first;
-
-		compileCtx.mInvokeParamList += ", ";
-		compileCtx.mInvokeParamList += itr->first;
+		// define particle's state struct
+		compileCtx.mStructDeclaration += "\t";
+		compileCtx.mStructDeclaration += DataType::name(itr->second.mDataType);
+		compileCtx.mStructDeclaration += ' ';
+		compileCtx.mStructDeclaration += itr->first;
+		compileCtx.mStructDeclaration += ";\n";
 	}
 
-	compileCtx.mDeclParamList += ')';
-	compileCtx.mInvokeParamList += ')';
+	compileCtx.mStructDeclaration += "};\n";
 
 	// generate sampler and output declarations
 	compileCtx.mNumTextures = (numFloats + 3) / 4;//a texel has 4 fields: a, r, g, b
@@ -488,16 +483,14 @@ static bool compileModifiers(
 		// signature
 		code = "void ";
 		code += script.mName;
-		code += ctx.mDeclParamList;
-		code += " {\n";
+		code += "(inout float _gr_seed, inout _gr_particle particle) {\n";
 
 		// invoke dependencies
 		const vector<string>& deps = script.mDependencies;
 		for(vector<string>::const_iterator itr = deps.begin(); itr != deps.end(); ++itr)
 		{
 			code += *itr;
-			code +=	ctx.mInvokeParamList;
-			code += ";\n";
+			code += "(_gr_seed, particle);\n";
 		}
 
 		// add own code
@@ -551,6 +544,13 @@ static void generateFetch(const CompileContext& ctx, const Script& script, strin
 		code += "ivec2 _gr_texCoord = ivec2(gl_FragCoord.xy);\n";
 	}
 
+	// Define struct to hold state
+	code += "_gr_particle particle;";
+	if(isEmitter)
+	{
+		code += "_gr_particle _gr_previous;";
+	}
+
 	// Fetch texels
 	for(size_t i = 0; i < ctx.mNumTextures; ++i)
 	{
@@ -561,12 +561,10 @@ static void generateFetch(const CompileContext& ctx, const Script& script, strin
 		code += "], _gr_texCoord, 0);\n";
 	}
 
-	string prefix = isEmitter ? "_gr_previous_" : "";
+	string prefix = isEmitter ? "_gr_previous." : "particle.";
 	for(Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
 	{
 		DataType::Enum attrType = itr->second.mDataType;
-		code += DataType::name(attrType);
-		code += ' ';
 		code += prefix;
 		code += itr->first;
 		code += " = ";
@@ -610,6 +608,7 @@ static bool linkModifier(
 	       "uniform float dt;\n";
 	code += ctx.mSamplerDeclarations;
 	code += ctx.mOutputDeclarations;
+	code += ctx.mStructDeclaration;
 
 	// sort dependencies
 	vector<const Script*> deps;
@@ -717,21 +716,21 @@ static bool linkModifier(
 
 	// invoke main script
 	code += script.mName;
-	code +=	ctx.mInvokeParamList;
-	code += ";\n";
+	code += "(_gr_seed, particle);\n";
 
 	if(isEmitter)
 	{
 		// randomly select
 		code += "bool _gr_canEmit = rand() <= _gr_chance;\n"
-		        "bool _gr_dead = _gr_previous_life <= 0.0;\n"
+		        "bool _gr_dead = _gr_previous.life <= 0.0;\n"
 		        "float _gr_selected = float(_gr_dead && _gr_canEmit);\n";
 		for(Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
 		{
+			code += "particle.";
 			code += itr->first;
-			code += " = mix(_gr_previous_";
+			code += " = mix(_gr_previous.";
 			code += itr->first;
-			code += ", ";
+			code += ", particle.";
 			code += itr->first;
 			code += ", _gr_selected);\n";
 		}
@@ -751,7 +750,7 @@ static bool linkModifier(
 				code += str((attrLoc + j) / 4);
 				code += "].";
 				code += gFieldNames[(attrLoc + j) % 4];
-				code += " = ";
+				code += " = particle.";
 				code += itr->first;
 				code += '.';
 				code += gFieldNames[j];
@@ -764,7 +763,7 @@ static bool linkModifier(
 			code += str(attrLoc / 4);
 			code += "].";
 			code +=	gFieldNames[attrLoc % 4];
-			code += " = ";
+			code += " = particle.";
 			code += itr->first;
 			code += ";\n";
 		}
@@ -809,6 +808,7 @@ static bool linkRenderShader(
 	code += "uniform int _gr_texWidth;\n"
 	        "uniform int _gr_texHeight;\n";
 	code += ctx.mSamplerDeclarations;
+	code += ctx.mStructDeclaration;
 	code += script.mGeneratedCode;
 
 	return true;
