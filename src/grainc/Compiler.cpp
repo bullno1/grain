@@ -8,12 +8,10 @@
 #include "CompileTask.hpp"
 #include "Script.hpp"
 #include "SourceMap.hpp"
+#include "builtins.h"
 #include "Logger.hpp"
 
 using namespace std;
-
-extern "C" const char builtins[];
-extern "C" const size_t builtins_len;
 
 namespace
 {
@@ -187,8 +185,8 @@ static bool compile(Compiler* compiler, CompileTask* task)
 	}
 
 	// Compute common code fragments
-	compileCtx.mDeclParamList = "(inout int _count";
-	compileCtx.mInvokeParamList = "(_count";
+	compileCtx.mDeclParamList = "(inout float _seed";
+	compileCtx.mInvokeParamList = "(_seed";
 	size_t numFloats = 0;
 
 	for(Declarations::const_iterator itr = compileCtx.mAttributes.begin()
@@ -702,7 +700,7 @@ static bool linkModifier(
 
 	// create main function
 	code += "void main()  {\n"
-	        "int _count = 0;\n";
+	        "float _seed = init_seed();\n";
 
 	generateFetch(ctx, script, code);
 

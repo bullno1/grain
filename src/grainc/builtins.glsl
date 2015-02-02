@@ -1,14 +1,19 @@
-float rand_(inout int _count)
+float init_seed()
 {
-	++_count;
-	return fract(sin(dot(vec2(gl_FragCoord.x * _count, gl_FragCoord.y * _time), vec2(12.9898, 78.233))) * 43758.5453);
+	return 0.0;
 }
 
-float random_range_(inout int _count, float lower, float upper)
+float rand_(inout float _seed)
 {
-	return lower + rand_(_count) * (upper - lower);
+	_seed += 1.0;
+	return fract(sin(dot(vec2(gl_FragCoord.x * _seed, gl_FragCoord.y * _time), vec2(12.9898, 78.233))) * 43758.5453);
 }
 
-#define rand() rand_(_count)
-#define random_range(lower, upper) random_range_(_count, lower, upper)
+float random_range_(inout float _seed, float lower, float upper)
+{
+	return lower + rand_(_seed) * (upper - lower);
+}
+
+#define rand() rand_(_seed)
+#define random_range(lower, upper) random_range_(_seed, lower, upper)
 #define select(condition, ifTrue, ifFalse) mix(ifFalse, ifTrue, float(condition))
