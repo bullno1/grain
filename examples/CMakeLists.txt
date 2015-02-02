@@ -32,8 +32,8 @@ add_demo(rain
 	${RES_SRC_DIR}/geyser.affector
 	${RES_SRC_DIR}/circle_deflector.affector
 	${RES_SRC_DIR}/line.emitter
-	${RES_SRC_DIR}/point.vsh
-	${RES_SRC_DIR}/point.fsh
+	${RES_SRC_DIR}/quad.vsh
+	${RES_SRC_DIR}/quad.fsh
 )
 
 add_demo(random

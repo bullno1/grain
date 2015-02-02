@@ -25,14 +25,14 @@ bool init(Context& ctx)
 	sysDef = ctx.load("resources/bin/rain", cerr);
 	if(sysDef == NULL) return false;
 
-	sys = sysDef->create(256, 512);
+	sys = sysDef->create(256, 256);
 	emitter = sys->createEmitter("line", cerr);
 	if(emitter == NULL) return false;
 
 	affector = sys->createAffector("geyser", cerr);
 	if(affector == NULL) return false;
 
-	renderer = sys->createRenderer("point", cerr);
+	renderer = sys->createRenderer("quad", cerr);
 	if(renderer == NULL) return false;
 
 	deflector = sys->createAffector("circle_deflector", cerr);
@@ -47,7 +47,7 @@ bool init(Context& ctx)
 	glBindBuffer(GL_ARRAY_BUFFER, buff);
 	float quad[] = {
 		-1.0f,  1.0f,
-		 1.0f,  1.1f,
+		 1.0f,  1.0f,
 		 1.0f, -1.0,
 		-1.0f, -1.0f
 	};
@@ -103,9 +103,8 @@ void update(Context& ctx)
 
 void render()
 {
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	renderer->prepare();
 	glBindVertexArray(vao);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glPointSize(2);
-	sys->render(GL_POINTS, 1);
+	sys->render(GL_TRIANGLE_FAN, 4);
 }

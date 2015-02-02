@@ -1,5 +1,6 @@
 #include <GL/glew.h>
 #include <iostream>
+#include <algorithm>
 #include "ParticleSystem.hpp"
 #include "SystemDefinition.hpp"
 #include "Program.hpp"
@@ -48,6 +49,7 @@ ParticleSystem::ParticleSystem(const SystemDefinition* def, size_t width, size_t
 	glBindFramebuffer(GL_FRAMEBUFFER, mFbo);
 
 	float* data = new float[4 * width * height];
+	std::fill_n(data, 4 * width * height, -20.0f);
 	for(size_t i = 0; i < def->mNumTextures; ++i)
 	{
 		GLuint evenTexture = createTexture(width, height, data);
@@ -144,17 +146,15 @@ Renderer* ParticleSystem::createRenderer(const char* name, std::ostream& err)
 	return result;
 }
 
-
 void ParticleSystem::render(GLenum primType, GLsizei count)
 {
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	vector<GLuint>& inputTexs = mFlipFlag ? mOddTextures : mEvenTextures;
 	for(size_t i = 0; i < mDef->mNumTextures; ++i)
 	{
 		glActiveTexture(GL_TEXTURE0 + i);
 		glBindTexture(GL_TEXTURE_2D, inputTexs[i]);
 	}
-	glDrawArraysInstanced(GL_POINTS, 0, 1, mTexWidth * mTexHeight);
+	glDrawArraysInstanced(primType, 0, count, mTexWidth * mTexHeight);
 }
 
 void ParticleSystem::flip()

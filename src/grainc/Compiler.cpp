@@ -809,11 +809,11 @@ static bool linkRenderShader(
 	std::string& code
 )
 {
-	code = "#version 140\n"
-	       "uniform int _texWidth;\n"
-	       "uniform int _texHeight;\n";
-	code += ctx.mSamplerDeclarations;
+	code = "#version 140\n";
 	code += script.mCustomDeclarations;
+	code += "uniform int _texWidth;\n"
+	        "uniform int _texHeight;\n";
+	code += ctx.mSamplerDeclarations;
 	code += script.mGeneratedCode;
 
 	return true;
