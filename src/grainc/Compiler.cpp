@@ -529,6 +529,9 @@ static bool compileRenderShaders(
 
 		code = "void main() {\n";
 		generateFetch(ctx, script, code);
+		code += "#line ";
+		code += str(script.mGeneratedCodeStartLine);
+		code += '\n';
 		code += script.mBody;
 		code += "\n}\n";
 	}
