@@ -1,9 +1,7 @@
-@param vec2 emission_point
 @param float width
 @param float height
 @attribute vec2 position
-@require aging
 
-float xOffset = random_range(-width/2, width/2);
-float yOffset = random_range(-height/2, height/2);
-position = emission_point + vec2(xOffset, yOffset);
+position.x = random_range(-width/2, width/2);
+position.y = random_range(-height/2, height/2);
+life = 1;

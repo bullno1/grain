@@ -69,11 +69,9 @@ void update(Context& ctx)
 	ctx.update(3.0f / 60.0f);
 
 	emitter->prepare();
-	emitter->setParamFloat("min_life", 23.0f);
-	emitter->setParamFloat("max_life", 29.0f);
 	emitter->setParamFloat("width", 256.0f);
 	emitter->setParamFloat("height", 256.0f);
-	emitter->setRate(0.9);
+	emitter->setRate(0.03);
 	emitter->run();
 }
 
