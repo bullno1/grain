@@ -185,8 +185,8 @@ static bool compile(Compiler* compiler, CompileTask* task)
 	}
 
 	// Compute common code fragments
-	compileCtx.mDeclParamList = "(inout float _seed";
-	compileCtx.mInvokeParamList = "(_seed";
+	compileCtx.mDeclParamList = "(inout float _gr_seed";
+	compileCtx.mInvokeParamList = "(_gr_seed";
 	size_t numFloats = 0;
 
 	for(Declarations::const_iterator itr = compileCtx.mAttributes.begin()
@@ -700,7 +700,7 @@ static bool linkModifier(
 
 	// create main function
 	code += "void main()  {\n"
-	        "float _seed = init_seed();\n";
+	        "float _gr_seed = _gr_init_seed();\n";
 
 	generateFetch(ctx, script, code);
 
