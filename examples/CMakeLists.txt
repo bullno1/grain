@@ -14,7 +14,7 @@ function(add_demo DEMO_NAME)
 	add_executable(${DEMO_NAME} common.cpp ${DEMO_NAME}.cpp ${RES})
 	add_custom_command(
 		OUTPUT ${RES}
-		COMMAND grainc ARGS -o ${RES} -I ${RES_SRC_DIR} ${ARGN}
+		COMMAND grainc ARGS -O -o ${RES} -I ${RES_SRC_DIR} ${ARGN}
 		DEPENDS ${ARGN}
 		VERBATIM
 	)
