@@ -210,18 +210,15 @@ static bool compile(Compiler* compiler, CompileTask* task)
 	compileCtx.mDeclParamList += ')';
 	compileCtx.mInvokeParamList += ')';
 
-	// generate sampler declarations
+	// generate sampler and output declarations
 	compileCtx.mNumTextures = (numFloats + 3) / 4;//a texel has 4 fields: a, r, g, b
-	for(size_t i = 0; i < compileCtx.mNumTextures; ++i)
-	{
-		compileCtx.mSamplerDeclarations += "uniform sampler2D _gr_tex";
-		compileCtx.mSamplerDeclarations += str(i);
-		compileCtx.mSamplerDeclarations += ";\n";
+	compileCtx.mSamplerDeclarations += "uniform sampler2D _gr_tex[";
+	compileCtx.mSamplerDeclarations += str(compileCtx.mNumTextures);
+	compileCtx.mSamplerDeclarations += "];\n";
 
-		compileCtx.mOutputDeclarations += "out vec4 _gr_out";
-		compileCtx.mOutputDeclarations += str(i);
-		compileCtx.mOutputDeclarations += ";\n";
-	}
+	compileCtx.mOutputDeclarations += "out vec4 _gr_out[";
+	compileCtx.mOutputDeclarations += str(compileCtx.mNumTextures);
+	compileCtx.mOutputDeclarations += "];\n";
 
 	// Compile all scripts
 	if(!compileModifiers(compileCtx, emitterCache)
@@ -559,9 +556,9 @@ static void generateFetch(const CompileContext& ctx, const Script& script, strin
 	{
 		code += "vec4 _gr_stream";
 		code += str(i);
-		code += " = texelFetch(_gr_tex";
+		code += " = texelFetch(_gr_tex[";
 		code += str(i);
-		code += ", _gr_texCoord, 0);\n";
+		code += "], _gr_texCoord, 0);\n";
 	}
 
 	string prefix = isEmitter ? "_gr_previous_" : "";
@@ -750,9 +747,9 @@ static bool linkModifier(
 		{
 			for(int j = 0; j < size; ++j)
 			{
-				code += "_gr_out";
+				code += "_gr_out[";
 				code += str((attrLoc + j) / 4);
-				code += '.';
+				code += "].";
 				code += gFieldNames[(attrLoc + j) % 4];
 				code += " = ";
 				code += itr->first;
@@ -763,9 +760,9 @@ static bool linkModifier(
 		}
 		else
 		{
-			code += "_gr_out";
+			code += "_gr_out[";
 			code += str(attrLoc / 4);
-			code += '.';
+			code += "].";
 			code +=	gFieldNames[attrLoc % 4];
 			code += " = ";
 			code += itr->first;
