@@ -34,7 +34,7 @@ void Program::prepare()
 void Program::run()
 {
 	const Context* context = mSystem->mDef->mContext;
-	glUniform1f(getUniformLocation("_time"), context->mTime);
+	glUniform1f(getUniformLocation("_gr_time"), context->mTime);
 	glUniform1f(getUniformLocation("dt"), context->mDt);
 
 	mSystem->flip();
@@ -71,7 +71,7 @@ Emitter::~Emitter()
 
 void Emitter::setRate(float rate)
 {
-	glUniform1f(getUniformLocation("_chance"), rate);
+	glUniform1f(getUniformLocation("_gr_chance"), rate);
 }
 
 Affector::Affector()

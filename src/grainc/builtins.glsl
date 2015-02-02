@@ -9,11 +9,11 @@ float _gr_noise(vec2 co)
 
 float _gr_init_seed()
 {
-	return _gr_noise(vec2(_time, _gr_noise(gl_FragCoord.xy)));
+	return _gr_noise(vec2(_gr_time, _gr_noise(gl_FragCoord.xy)));
 }
 
 float _gr_rand(inout float seed)
 {
-	seed = _gr_noise(vec2(gl_FragCoord.x * seed, gl_FragCoord.y * _time));
+	seed = _gr_noise(vec2(gl_FragCoord.x * seed, gl_FragCoord.y * _gr_time));
 	return seed;
 }

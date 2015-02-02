@@ -39,7 +39,7 @@ GLuint createProgram(GLuint vsh, GLuint fsh, size_t numOutputs, std::ostream& er
 	for(size_t i = 0; i < numOutputs; ++i)
 	{
 		stringstream ss;
-		ss << "out";
+		ss << "_gr_out";
 		ss << i;
 		glBindFragDataLocation(prog, i, ss.str().c_str());
 	}
@@ -65,7 +65,7 @@ GLuint createProgram(GLuint vsh, GLuint fsh, size_t numOutputs, std::ostream& er
 	{
 		glUseProgram(prog);
 		stringstream ss;
-		ss << "_tex";
+		ss << "_gr_tex";
 		ss << i;
 		glUniform1i(glGetUniformLocation(prog, ss.str().c_str()), i);
 	}

@@ -141,8 +141,8 @@ Renderer* ParticleSystem::createRenderer(const char* name, std::ostream& err)
 	result->mHandle = prog;
 	result->mSystem = this;
 	result->prepare();
-	glUniform1i(glGetUniformLocation(prog, "_texWidth"), mTexWidth);
-	glUniform1i(glGetUniformLocation(prog, "_texHeight"), mTexHeight);
+	glUniform1i(glGetUniformLocation(prog, "_gr_texWidth"), mTexWidth);
+	glUniform1i(glGetUniformLocation(prog, "_gr_texHeight"), mTexHeight);
 	return result;
 }
 

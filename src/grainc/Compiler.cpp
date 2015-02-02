@@ -214,11 +214,11 @@ static bool compile(Compiler* compiler, CompileTask* task)
 	compileCtx.mNumTextures = (numFloats + 3) / 4;//a texel has 4 fields: a, r, g, b
 	for(size_t i = 0; i < compileCtx.mNumTextures; ++i)
 	{
-		compileCtx.mSamplerDeclarations += "uniform sampler2D _tex";
+		compileCtx.mSamplerDeclarations += "uniform sampler2D _gr_tex";
 		compileCtx.mSamplerDeclarations += str(i);
 		compileCtx.mSamplerDeclarations += ";\n";
 
-		compileCtx.mOutputDeclarations += "out vec4 out";
+		compileCtx.mOutputDeclarations += "out vec4 _gr_out";
 		compileCtx.mOutputDeclarations += str(i);
 		compileCtx.mOutputDeclarations += ";\n";
 	}
@@ -546,25 +546,25 @@ static void generateFetch(const CompileContext& ctx, const Script& script, strin
 	if(isVertex)
 	{
 		// TODO: use textureSize
-		code += "ivec2 _size = ivec2(_texWidth, _texHeight);\n"
-		        "ivec2 _texCoord = ivec2(gl_InstanceID % _size.x, gl_InstanceID / _size.y);\n";
+		code += "ivec2 _gr_size = ivec2(_gr_texWidth, _gr_texHeight);\n"
+		        "ivec2 _gr_texCoord = ivec2(gl_InstanceID % _gr_size.x, gl_InstanceID / _gr_size.y);\n";
 	}
 	else
 	{
-		code += "ivec2 _texCoord = ivec2(gl_FragCoord.xy);\n";
+		code += "ivec2 _gr_texCoord = ivec2(gl_FragCoord.xy);\n";
 	}
 
 	// Fetch texels
 	for(size_t i = 0; i < ctx.mNumTextures; ++i)
 	{
-		code += "vec4 stream";
+		code += "vec4 _gr_stream";
 		code += str(i);
-		code += " = texelFetch(_tex";
+		code += " = texelFetch(_gr_tex";
 		code += str(i);
-		code += ", _texCoord, 0);\n";
+		code += ", _gr_texCoord, 0);\n";
 	}
 
-	string prefix = isEmitter ? "previous_" : "";
+	string prefix = isEmitter ? "_gr_previous_" : "";
 	for(Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
 	{
 		DataType::Enum attrType = itr->second.mDataType;
@@ -590,7 +590,7 @@ static void generateFetch(const CompileContext& ctx, const Script& script, strin
 			}
 
 			size_t attrLoc = ctx.mAttributeMap.find(itr->first)->second;
-			code += "stream";
+			code += "_gr_stream";
 			code += str((attrLoc + count) / 4);
 			code += '.';
 			code += gFieldNames[(attrLoc + count) % 4];
@@ -608,9 +608,9 @@ static bool linkModifier(
 {
 	// emitter is trickier with temporary storage
 	code = "#version 140\n"
-	       "uniform float _time;\n"
-	       "uniform float _chance;\n"
-           "uniform float dt;\n";
+	       "uniform float _gr_time;\n"
+	       "uniform float _gr_chance;\n"
+	       "uniform float dt;\n";
 	code += ctx.mSamplerDeclarations;
 	code += ctx.mOutputDeclarations;
 
@@ -726,17 +726,17 @@ static bool linkModifier(
 	if(isEmitter)
 	{
 		// randomly select
-		code += "bool canEmit = rand() <= _chance;\n"
-		        "bool dead = previous_life <= 0.0;\n"
-		        "float selected = float(dead && canEmit);\n";
+		code += "bool _gr_canEmit = rand() <= _gr_chance;\n"
+		        "bool _gr_dead = _gr_previous_life <= 0.0;\n"
+		        "float _gr_selected = float(_gr_dead && _gr_canEmit);\n";
 		for(Declarations::const_iterator itr = ctx.mAttributes.begin(); itr != ctx.mAttributes.end(); ++itr)
 		{
 			code += itr->first;
-			code += " = mix(previous_";
+			code += " = mix(_gr_previous_";
 			code += itr->first;
 			code += ", ";
 			code += itr->first;
-			code += ", selected);\n";
+			code += ", _gr_selected);\n";
 		}
 	}
 
@@ -750,7 +750,7 @@ static bool linkModifier(
 		{
 			for(int j = 0; j < size; ++j)
 			{
-				code += "out";
+				code += "_gr_out";
 				code += str((attrLoc + j) / 4);
 				code += '.';
 				code += gFieldNames[(attrLoc + j) % 4];
@@ -763,7 +763,7 @@ static bool linkModifier(
 		}
 		else
 		{
-			code += "out";
+			code += "_gr_out";
 			code += str(attrLoc / 4);
 			code += '.';
 			code +=	gFieldNames[attrLoc % 4];
@@ -809,8 +809,8 @@ static bool linkRenderShader(
 {
 	code = "#version 140\n";
 	code += script.mCustomDeclarations;
-	code += "uniform int _texWidth;\n"
-	        "uniform int _texHeight;\n";
+	code += "uniform int _gr_texWidth;\n"
+	        "uniform int _gr_texHeight;\n";
 	code += ctx.mSamplerDeclarations;
 	code += script.mGeneratedCode;
 
