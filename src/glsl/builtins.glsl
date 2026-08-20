@@ -13,12 +13,18 @@ void destroy() {
 
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
 
+#define GRAIN_SAMPLER_SET 0
+#define GRAIN_UNIFORM_SET 1
+
 vec2 quad() {
 	vec2 corner = vec2(gl_VertexIndex & 1, (gl_VertexIndex >> 1) & 1);  // [0,1]
 	return corner - 0.5; // [-0.5, 0.5]
 }
 
 #elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT
+
+#define GRAIN_SAMPLER_SET 2
+#define GRAIN_UNIFORM_SET 3
 
 vec4 grain_Color;
 
