@@ -3,7 +3,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-// RGBA32F
+// RGBA32UI
 #define GRAIN_TEXTURE_CAPACITY (sizeof(float) * 4)
 
 struct grain_archetype_s {
@@ -155,6 +155,31 @@ grain_type_size(CSPV_DataType type) {
 	}
 }
 
+static int
+grain_type_alignment(CSPV_DataType type) {
+	switch (type) {
+		case CSPV_TYPE_UNKNOWN: return 0;
+		case CSPV_TYPE_SINT:
+		case CSPV_TYPE_UINT:
+		case CSPV_TYPE_FLOAT:
+			return sizeof(float);
+		case CSPV_TYPE_SINT2:
+		case CSPV_TYPE_UINT2:
+		case CSPV_TYPE_FLOAT2:
+			return sizeof(float) * 2;
+		case CSPV_TYPE_SINT3:
+		case CSPV_TYPE_UINT3:
+		case CSPV_TYPE_FLOAT3:
+		case CSPV_TYPE_SINT4:
+		case CSPV_TYPE_UINT4:
+		case CSPV_TYPE_FLOAT4:
+			return sizeof(float) * 4;
+		case CSPV_TYPE_MAT4:
+			return sizeof(float) * 16;
+		default: return 0;
+	}
+}
+
 static void
 grain_pack_element(
 	char** shader,
@@ -171,7 +196,7 @@ grain_pack_element(
 		case 3: elem_name = "w"; break;
 	}
 
-	sfmt_append(*shader, "\tpacked[%d].%s = %s(attrs.%s%s);\n", lane_idx / 4, elem_name, packer, name, name_suffix);
+	sfmt_append(*shader, "\tpacked[%d].%s = %s(unpacked.%s%s);\n", lane_idx / 4, elem_name, packer, name, name_suffix);
 
 	*lane_idx_ptr = lane_idx + 1;
 }
@@ -180,76 +205,62 @@ static void
 grain_pack_attr(char** shader, int* lane_idx, grain_dsl_var_t attr_info) {
 	switch (attr_info.type) {
 		case CSPV_TYPE_SINT:
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, "");
-			break;
 		case CSPV_TYPE_UINT:
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, "");
 			break;
 		case CSPV_TYPE_FLOAT:
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "");
 			break;
 		case CSPV_TYPE_SINT2:
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".y");
-			break;
 		case CSPV_TYPE_UINT2:
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".y");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".x");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".y");
 			break;
 		case CSPV_TYPE_FLOAT2:
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".y");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".x");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".y");
 			break;
 		case CSPV_TYPE_SINT3:
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".y");
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".z");
-			break;
 		case CSPV_TYPE_UINT3:
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".y");
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".z");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".x");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".y");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".z");
 			break;
 		case CSPV_TYPE_FLOAT3:
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".y");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".z");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".x");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".y");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".z");
 			break;
 		case CSPV_TYPE_SINT4:
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".y");
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".z");
-			grain_pack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".w");
-			break;
 		case CSPV_TYPE_UINT4:
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".y");
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".z");
-			grain_pack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".w");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".x");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".y");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".z");
+			grain_pack_element(shader, lane_idx, "uint", attr_info.name, ".w");
 			break;
 		case CSPV_TYPE_FLOAT4:
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".x");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".y");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".z");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, ".w");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".x");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".y");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".z");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, ".w");
 			break;
 		case CSPV_TYPE_MAT4:
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[0].x");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[0].y");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[0].z");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[0].w");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[1].x");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[1].y");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[1].z");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[1].w");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[2].x");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[2].y");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[2].z");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[2].w");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[3].x");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[3].y");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[3].z");
-			grain_pack_element(shader, lane_idx, "float", attr_info.name, "[3].w");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[0].x");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[0].y");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[0].z");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[0].w");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[1].x");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[1].y");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[1].z");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[1].w");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[2].x");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[2].y");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[2].z");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[2].w");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[3].x");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[3].y");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[3].z");
+			grain_pack_element(shader, lane_idx, "floatBitsToUint", attr_info.name, "[3].w");
 			break;
 		default:
 			break;
@@ -272,7 +283,7 @@ grain_unpack_element(
 		case 3: elem_name = "w"; break;
 	}
 
-	sfmt_append(*shader, "\tattrs.%s%s = %s(packed[%d].%s);\n", name, name_suffix, unpacker, lane_idx / 4, elem_name);
+	sfmt_append(*shader, "\tunpacked.%s%s = %s(packed[%d].%s);\n", name, name_suffix, unpacker, lane_idx / 4, elem_name);
 
 	*lane_idx_ptr = lane_idx + 1;
 }
@@ -281,76 +292,76 @@ static void
 grain_unpack_attr(char** shader, int* lane_idx, grain_dsl_var_t attr_info) {
 	switch (attr_info.type) {
 		case CSPV_TYPE_SINT:
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, "");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, "");
 			break;
 		case CSPV_TYPE_UINT:
-			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "");
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, "");
 			break;
 		case CSPV_TYPE_FLOAT:
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "");
 			break;
 		case CSPV_TYPE_SINT2:
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".x");
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".y");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".x");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".y");
 			break;
 		case CSPV_TYPE_UINT2:
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".x");
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".y");
+			break;
+		case CSPV_TYPE_FLOAT2:
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".x");
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".y");
 			break;
-		case CSPV_TYPE_FLOAT2:
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".x");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".y");
-			break;
 		case CSPV_TYPE_SINT3:
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".x");
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".y");
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".z");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".x");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".y");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".z");
 			break;
 		case CSPV_TYPE_UINT3:
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".x");
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".y");
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".z");
+			break;
+		case CSPV_TYPE_FLOAT3:
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".x");
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".y");
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".z");
 			break;
-		case CSPV_TYPE_FLOAT3:
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".x");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".y");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".z");
-			break;
 		case CSPV_TYPE_SINT4:
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".x");
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".y");
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".z");
-			grain_unpack_element(shader, lane_idx, "intBitsToFloat", attr_info.name, ".w");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".x");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".y");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".z");
+			grain_unpack_element(shader, lane_idx, "int", attr_info.name, ".w");
 			break;
 		case CSPV_TYPE_UINT4:
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".x");
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".y");
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".z");
+			grain_unpack_element(shader, lane_idx, "uint", attr_info.name, ".w");
+			break;
+		case CSPV_TYPE_FLOAT4:
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".x");
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".y");
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".z");
 			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, ".w");
 			break;
-		case CSPV_TYPE_FLOAT4:
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".x");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".y");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".z");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, ".w");
-			break;
 		case CSPV_TYPE_MAT4:
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[0].x");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[0].y");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[0].z");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[0].w");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[1].x");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[1].y");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[1].z");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[1].w");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[2].x");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[2].y");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[2].z");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[2].w");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[3].x");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[3].y");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[3].z");
-			grain_unpack_element(shader, lane_idx, "float", attr_info.name, "[3].w");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[0].x");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[0].y");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[0].z");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[0].w");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[1].x");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[1].y");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[1].z");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[1].w");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[2].x");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[2].y");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[2].z");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[2].w");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[3].x");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[3].y");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[3].z");
+			grain_unpack_element(shader, lane_idx, "uintBitsToFloat", attr_info.name, "[3].w");
 			break;
 		default:
 			break;
@@ -414,8 +425,11 @@ grain_archetype_t*
 grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t spec) {
 	grain_reset_arena(grain);
 
-	// Common shader file
+	grain_archetype_t* archetype = NULL;
 	char* archetype_common = NULL;
+	char* archetype_update = NULL;
+
+	// Common shader file
 
 	// Collect attributes
 	CK_MAP(grain_attr_info_t) particle_attrs = NULL;
@@ -466,14 +480,14 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	for (int i = 0; i < num_textures; ++i) {
 		sfmt_append(
 			archetype_common,
-			"layout (set = GRAIN_SAMPLER_SET, binding = %d) uniform sampler2D grain__texture_%d;\n",
+			"layout (set = GRAIN_SAMPLER_SET, binding = %d) uniform usampler2D grain__texture_%d;\n",
 			i, i
 		);
 	}
 
 	sappend(archetype_common, "\n");
-	sfmt_append(archetype_common, "vec4[%d] grain__pack(ParticleAttrs atrs) {\n", num_textures);
-	sfmt_append(archetype_common, "\tvec4[%d] packed;\n", num_textures);
+	sfmt_append(archetype_common, "uvec4[%d] grain__pack_ParticleAttrs(ParticleAttrs unpacked) {\n", num_textures);
+	sfmt_append(archetype_common, "\tuvec4[%d] packed;\n", num_textures);
 	int pack_lane_idx = 0;
 	for (int i = 0; i < map_size(particle_attrs); ++i) {
 		grain_pack_attr(&archetype_common, &pack_lane_idx, particle_attrs[i].var_info);
@@ -482,28 +496,161 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend    (archetype_common, "}\n");
 
 	sappend(archetype_common, "\n");
-	sfmt_append(archetype_common, "ParticleAttrs grain__unpack(vec4[%d] packed) {\n", num_textures);
-	sappend    (archetype_common, "\tParticleAttrs attrs;\n");
+	sfmt_append(archetype_common, "ParticleAttrs grain__unpack_ParticleAttrs(uvec4[%d] packed) {\n", num_textures);
+	sappend    (archetype_common, "\tParticleAttrs unpacked;\n");
 	int unpack_lane_idx = 0;
 	for (int i = 0; i < map_size(particle_attrs); ++i) {
 		grain_unpack_attr(&archetype_common, &unpack_lane_idx, particle_attrs[i].var_info);
 	}
-	sappend    (archetype_common, "\treturn attrs;\n");
+	sappend    (archetype_common, "\treturn unpacked;\n");
 	sappend    (archetype_common, "}\n");
 
-	printf("%s\n", archetype_common);
-	sfree(archetype_common);
-
-	// SystemParams type
+	// Import update modules
+	sappend(archetype_common, "\n");
+	sappend(archetype_common, "#define Module(X)\n");
+	sappend(archetype_common, "#define Requires(X)\n");
 	for (int i = 0; i < spec.num_emitters; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.emitters[i];
+		sfmt_append(archetype_common, "#define Params(X) struct %s_%s_ModuleParams { %s }\n", "emitter", module->info->name, asize(module->info->module_params) != 0 ? "X" : "int grain__ingore;");
+		sfmt_append(archetype_common, "#define ModuleParams %s_%s_ModuleParams\n", "emitter", module->info->name);
+		sfmt_append(archetype_common, "#define process %s_%s_process\n", "emitter", module->info->name);
+		sfmt_append(archetype_common, "#include \"emitter/%s\"\n", module->info->name);
+		sappend    (archetype_common, "#undef process\n");
+		sappend    (archetype_common, "#undef ModuleParams\n");
+		sappend    (archetype_common, "#undef Params\n");
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.affectors[i];
+		sfmt_append(archetype_common, "#define Params(X) struct %s_%s_ModuleParams { %s }\n", "affector", module->info->name, asize(module->info->module_params) != 0 ? "X" : "int grain__ingore;");
+		sfmt_append(archetype_common, "#define ModuleParams %s_%s_ModuleParams\n", "affector", module->info->name);
+		sfmt_append(archetype_common, "#define process %s_%s_process\n", "affector", module->info->name);
+		sfmt_append(archetype_common, "#include \"affector/%s\"\n", module->info->name);
+		sappend    (archetype_common, "#undef process\n");
+		sappend    (archetype_common, "#undef ModuleParams\n");
+		sappend    (archetype_common, "#undef Params\n");
 	}
 
-	map_free(particle_attrs);
-	return (grain_archetype_t*)(0x01);
+	// Update shader
+	sappend(archetype_update, "#include \"grain/internal/builtins.glsl\"\n");
+	sappend(archetype_update, "#include \"common\"\n");
 
+	// SystemParams
+	sappend(archetype_update, "\n");
+	sappend(archetype_update, "struct SystemParams {\n");
+	for (int i = 0; i < spec.num_emitters; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.emitters[i];
+		if (asize(module->info->module_params) != 0) {
+			sfmt_append(archetype_update, "\temitter_%s_ModuleParams emitter_%d;\n", module->info->name, i);
+		}
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.affectors[i];
+		if (asize(module->info->module_params) != 0) {
+			sfmt_append(archetype_update, "\taffector_%s_ModuleParams affector_%d;\n", module->info->name, i);
+		}
+	}
+	sappend(archetype_update, "};\n");
+
+	// Loading system data
+	sappend(archetype_update, "\n");
+	sappend(archetype_update, "#ifdef CF_GLES\n");
+	sappend(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = 0) readonly buffer { uvec4 grain__system_params[]; };\n");
+	sappend(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = 1) readonly buffer { uvec4 grain__system_clocks[]; };\n");
+
+	// Load system params from the emulated buffer
+	sappend(archetype_update, "SystemParams grain__fetch_system_params(uint i) {\n");
+
+	// Calculate size
+	int offset = 0;
+	for (int i = 0; i < spec.num_emitters; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.emitters[i];
+		if (asize(module->info->module_params) != 0) {
+			for (int j = 0; j < asize(module->info->module_params); ++j) {
+				grain_dsl_var_t var = module->info->module_params[j];
+				int alignment = grain_type_alignment(var.type);
+				offset = ((offset + alignment - 1) / alignment) * alignment;
+				offset += grain_type_size(var.type);
+			}
+		}
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.affectors[i];
+		if (asize(module->info->module_params) != 0) {
+			for (int j = 0; j < asize(module->info->module_params); ++j) {
+				grain_dsl_var_t var = module->info->module_params[j];
+				int alignment = grain_type_alignment(var.type);
+				offset = ((offset + alignment - 1) / alignment) * alignment;
+				offset += grain_type_size(var.type);
+			}
+		}
+	}
+	int num_uvec4 = (offset + GRAIN_TEXTURE_CAPACITY - 1) / GRAIN_TEXTURE_CAPACITY;
+	sfmt_append(archetype_update, "\tuvec4[%d] packed;\n", num_uvec4);
+	for (int i = 0; i < num_uvec4; ++i) {
+		sfmt_append(archetype_update, "\tpacked[%d] = grain__system_params[i * %d + %d];\n", i, num_uvec4, i);
+	}
+
+	sappend(archetype_update, "\n");
+	sappend(archetype_update, "\tSystemParams params;\n");
+	offset = 0;
+	for (int i = 0; i < spec.num_emitters; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.emitters[i];
+		if (asize(module->info->module_params) != 0) {
+			sappend(archetype_update, "\t{\n");
+			sfmt_append(archetype_update, "\temitter_%s_ModuleParams unpacked;\n", module->info->name);
+			for (int j = 0; j < asize(module->info->module_params); ++j) {
+				grain_dsl_var_t var = module->info->module_params[j];
+				int alignment = grain_type_alignment(var.type);
+				offset = ((offset + alignment - 1) / alignment) * alignment;
+
+				int index = offset / sizeof(float);
+				grain_unpack_attr(&archetype_update, &index, var);
+
+				offset += grain_type_size(var.type);
+			}
+			sfmt_append(archetype_update, "\tparams.emitter_%d = unpacked;\n", i);
+			sappend(archetype_update, "\t}\n");
+		}
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.affectors[i];
+		if (asize(module->info->module_params) != 0) {
+			for (int j = 0; j < asize(module->info->module_params); ++j) {
+				grain_dsl_var_t var = module->info->module_params[j];
+				int alignment = grain_type_alignment(var.type);
+				offset = ((offset + alignment - 1) / alignment) * alignment;
+
+				offset += grain_type_size(var.type);
+			}
+		}
+	}
+
+	sappend(archetype_update, "\treturn params;\n");
+	sappend(archetype_update, "}\n");
+
+	sappend(archetype_update, "SystemClock grain__fetch_system_clock(uint i) {\n");
+	sappend(archetype_update, "\treturn grain__unpack_SystemClock(grain__system_clocks[i]);\n");
+	sappend(archetype_update, "}\n");
+	sappend(archetype_update, "#else\n");
+	sappend(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = 0) readonly buffer { SystemParams grain__system_params[]; };\n");
+	sappend(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = 1) readonly buffer { SystemClock grain__system_clocks[]; };\n");
+	sappend(archetype_update, "SystemParams grain__fetch_system_params(uint i) {\n");
+	sappend(archetype_update, "\treturn grain__system_params[i];\n");
+	sappend(archetype_update, "}\n");
+	sappend(archetype_update, "SystemClock grain__fetch_system_clock(uint i) {\n");
+	sappend(archetype_update, "\treturn grain__system_clock[i];\n");
+	sappend(archetype_update, "}\n");
+	sappend(archetype_update, "#endif\n");
+
+	archetype = (void*)0x01;
+
+	printf("// Common\n%s\n", archetype_common);
+	printf("// Update\n%s\n", archetype_update);
 fail:
+	sfree(archetype_common);
+	sfree(archetype_update);
 	map_free(particle_attrs);
-	return NULL;
+	return archetype;
 }
 
 void

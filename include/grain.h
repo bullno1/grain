@@ -65,9 +65,6 @@ void
 grain_destroy_system(grain_system_t* system);
 
 void
-grain_begin_update(void);
-
-void
 grain_tick(grain_system_t* system, float dt_s);
 
 void
@@ -97,15 +94,15 @@ grain_set_renderer_parameter(
 );
 
 void
-grain_end_update(void);
+grain_update(grain_t* grain);
 
 void
-grain_begin_render(void);
+grain_begin_render(grain_t* grain);
 
 void
 grain_render(grain_system_t* system);
 
 void
-grain_end_render(void);
+grain_end_render(grain_t* grain);
 
 #endif

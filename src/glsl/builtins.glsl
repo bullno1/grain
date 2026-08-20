@@ -4,11 +4,35 @@ struct Ctx {
 	float time;
 };
 
-float rand() {
-	return 0.0; // TODO: implement
+struct SystemClock {
+    float rate;
+    float elapsed;
+    float dt;
+    uint gen_base;
+};
+
+uint grain__rng_state;
+
+uint pcg(uint v) {
+    uint state = v * 747796405u + 2891336453u;
+    uint word  = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
-void destroy() {
+void srand(uint id, uint gen) { grain__rng_state = pcg(id ^ pcg(gen)); }
+
+float rand() {
+    grain__rng_state = pcg(grain__rng_state);
+    return float(grain__rng_state) * (1.0 / 4294967296.0);
+}
+
+SystemClock grain__unpack_SystemClock(uvec4 v) {
+	SystemClock clock;
+	clock.rate = uintBitsToFloat(v.x);
+	clock.elapsed = uintBitsToFloat(v.y);
+	clock.dt = uintBitsToFloat(v.z);
+	clock.gen_base = uintBitsToFloat(v.w);
+	return clock;
 }
 
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
