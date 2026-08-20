@@ -1,5 +1,5 @@
 #include "xincbin.h"
 
-XINCBIN(grain_update_vs, GRAIN_SRC_DIR "glsl/update.glsl")
+XINCBIN(grain_update_vs, GRAIN_SRC_DIR "glsl/update.vert.glsl")
 XINCBIN(grain_builtins, GRAIN_SRC_DIR "glsl/builtins.glsl")
 XINCBIN(grain_inspect_stub, GRAIN_SRC_DIR "glsl/inspect.glsl")

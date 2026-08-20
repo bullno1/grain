@@ -505,34 +505,43 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend    (archetype_common, "\treturn unpacked;\n");
 	sappend    (archetype_common, "}\n");
 
-	// Import update modules
-	sappend(archetype_common, "\n");
-	sappend(archetype_common, "#define Module(X)\n");
-	sappend(archetype_common, "#define Requires(X)\n");
-	for (int i = 0; i < spec.num_emitters; ++i) {
-		grain_module_t* module = (grain_module_t*)spec.emitters[i];
-		sfmt_append(archetype_common, "#define Params(X) struct %s_%s_ModuleParams { %s }\n", "emitter", module->info->name, asize(module->info->module_params) != 0 ? "X" : "int grain__ingore;");
-		sfmt_append(archetype_common, "#define ModuleParams %s_%s_ModuleParams\n", "emitter", module->info->name);
-		sfmt_append(archetype_common, "#define process %s_%s_process\n", "emitter", module->info->name);
-		sfmt_append(archetype_common, "#include \"emitter/%s\"\n", module->info->name);
-		sappend    (archetype_common, "#undef process\n");
-		sappend    (archetype_common, "#undef ModuleParams\n");
-		sappend    (archetype_common, "#undef Params\n");
+	sappend    (archetype_common, "\n");
+	sappend    (archetype_common, "ParticleAttrs grain__load_ParticleAttrs(ivec2 texel) {\n");
+	sfmt_append(archetype_common, "\tvec[%d] packed;\n", num_textures);
+	for (int i = 0; i < num_textures; ++i) {
+		sfmt_append(archetype_common, "\tpacked[%d] = texelFetch(grain__texture_%d, texel, 0);\n", i, i);
 	}
-	for (int i = 0; i < spec.num_affectors; ++i) {
-		grain_module_t* module = (grain_module_t*)spec.affectors[i];
-		sfmt_append(archetype_common, "#define Params(X) struct %s_%s_ModuleParams { %s }\n", "affector", module->info->name, asize(module->info->module_params) != 0 ? "X" : "int grain__ingore;");
-		sfmt_append(archetype_common, "#define ModuleParams %s_%s_ModuleParams\n", "affector", module->info->name);
-		sfmt_append(archetype_common, "#define process %s_%s_process\n", "affector", module->info->name);
-		sfmt_append(archetype_common, "#include \"affector/%s\"\n", module->info->name);
-		sappend    (archetype_common, "#undef process\n");
-		sappend    (archetype_common, "#undef ModuleParams\n");
-		sappend    (archetype_common, "#undef Params\n");
-	}
+	sappend    (archetype_common, "\treturn grain__unpack_ParticleAttrs(packed);\n");
+	sappend    (archetype_common, "}\n");
 
 	// Update shader
 	sappend(archetype_update, "#include \"grain/internal/builtins.glsl\"\n");
-	sappend(archetype_update, "#include \"common\"\n");
+
+	// Import update modules
+	sappend(archetype_update, "\n");
+	sappend(archetype_update, "#define Module(X)\n");
+	sappend(archetype_update, "#define Requires(X)\n");
+	for (int i = 0; i < spec.num_emitters; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.emitters[i];
+		sfmt_append(archetype_update, "#define Params(X) struct %s_%s_ModuleParams { %s }\n", "emitter", module->info->name, asize(module->info->module_params) != 0 ? "X" : "int grain__ingore;");
+		sfmt_append(archetype_update, "#define ModuleParams %s_%s_ModuleParams\n", "emitter", module->info->name);
+		sfmt_append(archetype_update, "#define process %s_%s_process\n", "emitter", module->info->name);
+		sfmt_append(archetype_update, "#include \"emitter/%s\"\n", module->info->name);
+		sappend    (archetype_update, "#undef process\n");
+		sappend    (archetype_update, "#undef ModuleParams\n");
+		sappend    (archetype_update, "#undef Params\n");
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.affectors[i];
+		sfmt_append(archetype_update, "#define Params(X) struct %s_%s_ModuleParams { %s }\n", "affector", module->info->name, asize(module->info->module_params) != 0 ? "X" : "int grain__ingore;");
+		sfmt_append(archetype_update, "#define ModuleParams %s_%s_ModuleParams\n", "affector", module->info->name);
+		sfmt_append(archetype_update, "#define process %s_%s_process\n", "affector", module->info->name);
+		sfmt_append(archetype_update, "#include \"affector/%s\"\n", module->info->name);
+		sappend    (archetype_update, "#undef process\n");
+		sappend    (archetype_update, "#undef ModuleParams\n");
+		sappend    (archetype_update, "#undef Params\n");
+	}
+	sappend(archetype_update, "#include \"archetype/common.glsl\"\n");
 
 	// SystemParams
 	sappend(archetype_update, "\n");
@@ -554,11 +563,11 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	// Loading system data
 	sappend(archetype_update, "\n");
 	sappend(archetype_update, "#ifdef CF_GLES\n");
-	sappend(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = 0) readonly buffer { uvec4 grain__system_params[]; };\n");
-	sappend(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = 1) readonly buffer { uvec4 grain__system_clocks[]; };\n");
+	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain__system_params { uvec4 grain__system_params[]; };\n", num_textures + 0);
+	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain__system_clocks { uvec4 grain__system_clocks[]; };\n", num_textures + 1);
 
 	// Load system params from the emulated buffer
-	sappend(archetype_update, "SystemParams grain__fetch_system_params(uint i) {\n");
+	sappend(archetype_update, "SystemParams grain__load_SystemParams(uint i) {\n");
 
 	// Calculate size
 	int offset = 0;
@@ -628,19 +637,32 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(archetype_update, "\treturn params;\n");
 	sappend(archetype_update, "}\n");
 
-	sappend(archetype_update, "SystemClock grain__fetch_system_clock(uint i) {\n");
+	sappend(archetype_update, "SystemClock grain__load_SystemClock(uint i) {\n");
 	sappend(archetype_update, "\treturn grain__unpack_SystemClock(grain__system_clocks[i]);\n");
 	sappend(archetype_update, "}\n");
 	sappend(archetype_update, "#else\n");
-	sappend(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = 0) readonly buffer { SystemParams grain__system_params[]; };\n");
-	sappend(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = 1) readonly buffer { SystemClock grain__system_clocks[]; };\n");
-	sappend(archetype_update, "SystemParams grain__fetch_system_params(uint i) {\n");
+	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain__system_params { SystemParams grain__system_params[]; };\n", num_textures + 0);
+	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain__system_clocks { SystemClock grain__system_clocks[]; };\n", num_textures + 1);
+	sappend(archetype_update, "SystemParams grain__load_SystemParams(uint i) {\n");
 	sappend(archetype_update, "\treturn grain__system_params[i];\n");
 	sappend(archetype_update, "}\n");
-	sappend(archetype_update, "SystemClock grain__fetch_system_clock(uint i) {\n");
+	sappend(archetype_update, "SystemClock grain__load_SystemClock(uint i) {\n");
 	sappend(archetype_update, "\treturn grain__system_clock[i];\n");
 	sappend(archetype_update, "}\n");
 	sappend(archetype_update, "#endif\n");
+
+	sappend(archetype_update, "\n");
+	for (int i = 0; i < num_textures; ++i) {
+		sfmt_append(archetype_update, "layout(location = %d) out uvec4 grain__output_%d;\n", i, i);
+	}
+
+	sappend(archetype_update, "\n");
+	sappend(archetype_update, "void grain__store_ParticleAttrs(ParticleAttrs particle) {\n");
+	sfmt_append(archetype_update, "\tuvec4[%d] packed = grain__pack_ParticleAttrs(particle);\n", num_textures);
+	for (int i = 0; i < num_textures; ++i) {
+		sfmt_append(archetype_update, "\tgrain__output_%d = packed[%d];\n", i, i);
+	}
+	sappend(archetype_update, "}\n");
 
 	archetype = (void*)0x01;
 

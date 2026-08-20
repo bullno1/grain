@@ -1,6 +1,18 @@
+#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
+
+#define GRAIN_SAMPLER_SET 0
+#define GRAIN_UNIFORM_SET 1
+
+#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT
+
+#define GRAIN_SAMPLER_SET 2
+#define GRAIN_UNIFORM_SET 3
+
+#endif
+
 struct Ctx {
 	float dt;
-	float frameDt;
+	float frame_dt;
 	float time;
 };
 
@@ -9,6 +21,13 @@ struct SystemClock {
     float elapsed;
     float dt;
     uint gen_base;
+};
+
+struct Schedule {
+    uint  gen;
+    float age;
+    bool  started;
+    bool  emit;
 };
 
 uint grain__rng_state;
@@ -31,14 +50,11 @@ SystemClock grain__unpack_SystemClock(uvec4 v) {
 	clock.rate = uintBitsToFloat(v.x);
 	clock.elapsed = uintBitsToFloat(v.y);
 	clock.dt = uintBitsToFloat(v.z);
-	clock.gen_base = uintBitsToFloat(v.w);
+	clock.gen_base = v.w;
 	return clock;
 }
 
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
-
-#define GRAIN_SAMPLER_SET 0
-#define GRAIN_UNIFORM_SET 1
 
 vec2 quad() {
 	vec2 corner = vec2(gl_VertexIndex & 1, (gl_VertexIndex >> 1) & 1);  // [0,1]
@@ -46,9 +62,6 @@ vec2 quad() {
 }
 
 #elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT
-
-#define GRAIN_SAMPLER_SET 2
-#define GRAIN_UNIFORM_SET 3
 
 vec4 grain_Color;
 
