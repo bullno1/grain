@@ -3,6 +3,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+// RGBA32F
+#define GRAIN_TEXTURE_CAPACITY (sizeof(float) * 4)
+
 struct grain_archetype_s {
 	grain_archetype_spec_t spec;
 
@@ -121,8 +124,34 @@ grain_type_name(CSPV_DataType type) {
 		case CSPV_TYPE_SINT4:   return "ivec4";
 		case CSPV_TYPE_UINT4:   return "uvec4";
 		case CSPV_TYPE_FLOAT4:  return "vec4";
-		case CSPV_TYPE_MAT4 :   return "mat4";
+		case CSPV_TYPE_MAT4:    return "mat4";
 		default: return "";
+	}
+}
+
+static int
+grain_type_size(CSPV_DataType type) {
+	switch (type) {
+		case CSPV_TYPE_UNKNOWN: return 0;
+		case CSPV_TYPE_SINT:
+		case CSPV_TYPE_UINT:
+		case CSPV_TYPE_FLOAT:
+			return sizeof(float);
+		case CSPV_TYPE_SINT2:
+		case CSPV_TYPE_UINT2:
+		case CSPV_TYPE_FLOAT2:
+			return sizeof(float) * 2;
+		case CSPV_TYPE_SINT3:
+		case CSPV_TYPE_UINT3:
+		case CSPV_TYPE_FLOAT3:
+			return sizeof(float) * 3;
+		case CSPV_TYPE_SINT4:
+		case CSPV_TYPE_UINT4:
+		case CSPV_TYPE_FLOAT4:
+			return sizeof(float) * 4;
+		case CSPV_TYPE_MAT4:
+			return sizeof(float) * 16;
+		default: return 0;
 	}
 }
 
@@ -218,10 +247,21 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(shader, "};\n");
 	printf("%s\n", shader);
 
+	int attr_total_size = 0;
+	for (int i = 0; i < map_size(particle_attrs); ++i) {
+		attr_total_size += grain_type_size(particle_attrs[i].var_info.type);
+	}
+	int num_textures = (attr_total_size + GRAIN_TEXTURE_CAPACITY - 1) / GRAIN_TEXTURE_CAPACITY;
+	printf("Num textures = %d\n", num_textures);
+	if (num_textures > CF_MAX_CANVAS_TARGETS) {
+		grain_set_last_error(grain, "Archetype requires too many storage tetures");
+		goto fail;
+	}
+
 	sfree(shader);
 
 	map_free(particle_attrs);
-	return NULL;
+	return (grain_archetype_t*)(0x01);
 
 fail:
 	map_free(particle_attrs);
