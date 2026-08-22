@@ -2,9 +2,8 @@
 #define GRAIN_H
 
 #include <stdint.h>
-
-#define GRAIN_DECL_MAYBE(T) typedef struct T##_maybe { bool success; union { T* value; const char* error; }; } T##_maybe;
-#define GRAIN_MAYBE(T) T##_maybe
+#include <cute_graphics.h>
+#include <cute/ckit.h>
 
 typedef struct grain_s grain_t;
 typedef struct grain_emitter_s grain_emitter_t;
@@ -31,6 +30,25 @@ typedef struct {
 	int max_particles_per_system;
 } grain_pool_opts;
 
+typedef struct {
+	const char* name;
+	CF_ShaderInfoDataType type;
+} grain_parameter_info_t;
+
+typedef struct {
+	const char* name;
+	int first_params;
+	int num_params;
+} grain_module_info_t;
+
+typedef struct {
+	CK_DYNA grain_module_info_t* emitters;
+	CK_DYNA grain_module_info_t* affectors;
+	        grain_module_info_t  renderer;
+
+	CK_DYNA grain_parameter_info_t* params;
+} grain_archetype_info_t;
+
 grain_t*
 grain_create(void);
 
@@ -51,6 +69,9 @@ grain_define_renderer(grain_t* grain, const char* source);
 
 grain_archetype_t*
 grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t spec);
+
+grain_archetype_info_t
+grain_inspect_archetype(grain_archetype_t* archetype);
 
 grain_pool_t*
 grain_create_pool(grain_t* grain, grain_pool_opts opts);

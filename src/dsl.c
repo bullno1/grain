@@ -80,7 +80,7 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 	grain_cspv_ctx_t ctx = {
 		.vfs = (grain_vfs_entry_t[]){
 			{
-				.name = "grain/internal/builtins.glsl",
+				.name = "internal/builtins.glsl",
 				.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_builtins)),
 			},
 			{
@@ -185,6 +185,101 @@ fail:
 	afree(particle_attrs);
 	afree(module_params);
 	cspv_free(&inspect_result);
+	return NULL;
+}
+
+grain_dsl_archetype_t*
+grain_dsl_compile_archetype(
+	grain_t* grain,
+	grain_archetype_spec_t spec,
+	const char* common_source,
+	const char* update_source,
+	const char* render_source
+) {
+	CSPV_Result update_fs_result = { 0 };
+	CSPV_Result render_vs_result = { 0 };
+	CSPV_Result render_fs_result = { 0 };
+
+	int num_vfs_entries = spec.num_emitters + spec.num_affectors + 6;
+	int vfs_index = 0;
+	grain_vfs_entry_t* vfs_entries = cf_arena_alloc(&grain->arena, num_vfs_entries * sizeof(grain_vfs_entry_t));
+	for (int i = 0; i < spec.num_emitters; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.emitters[i];
+		vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+			.name = grain_sprintf(grain, "emitter/%s", module->info->name),
+			.content = module->source,
+		};
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.affectors[i];
+		vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+			.name = grain_sprintf(grain, "affector/%s", module->info->name),
+			.content = module->source,
+		};
+	}
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+		.name = "internal/builtins.glsl",
+		.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_builtins)),
+	};
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+		.name = grain_sprintf(grain, "renderer/%s", ((grain_module_t*)spec.renderer)->info->name),
+		.content = ((grain_module_t*)spec.renderer)->source,
+	};
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+		.name = "archetype/common.glsl",
+		.content = common_source,
+	};
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+		.name = "archetype/update.glsl",
+		.content = update_source,
+
+	};
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+		.name = "archetype/update.glsl",
+		.content = update_source,
+
+	};
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){ 0 };
+
+	grain_cspv_ctx_t ctx = {
+		.vfs = vfs_entries,
+	};
+
+	char stage_str[sizeof("1")];
+	CSPV_Stage stage;
+
+	CSPV_Options opts = {
+		.user = &ctx,
+		.include_resolve = grain_resolve_include,
+
+		.defines = (CSPV_Define[]) {
+			{ .name = "GRAIN_SHADER_STAGE_VERTEX", .value = "0" },
+			{ .name = "GRAIN_SHADER_STAGE_FRAGMENT", .value = "1" },
+			{ .name = "GRAIN_SHADER_STAGE_COMPUTE", .value = "2" },
+			{ .name = "GRAIN_SHADER_STAGE", .value = stage_str },
+		},
+		.num_defines = 4,
+	};
+
+	stage = CSPV_STAGE_FRAGMENT;
+	snprintf(stage_str, sizeof(stage_str), "%d", stage);
+	update_fs_result = cspv_compile_ex(
+		grain_dsl_materialize(grain, XINCBIN_GET(grain_update_fs)),
+		stage,
+		&opts
+	);
+	if (!update_fs_result.success) {
+		grain_set_last_error(grain, grain_strcpy(grain, update_fs_result.error_message));
+		goto fail;
+	}
+	if (update_fs_result.preprocessed) {
+		printf("%s\n", update_fs_result.preprocessed);
+	}
+
+fail:
+	cspv_free(&update_fs_result);
+	cspv_free(&render_vs_result);
+	cspv_free(&render_fs_result);
 	return NULL;
 }
 

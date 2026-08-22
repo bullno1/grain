@@ -2,11 +2,13 @@
 
 #define GRAIN_SAMPLER_SET 0
 #define GRAIN_UNIFORM_SET 1
+#define Varying(X) layout(location = X) out
 
 #elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT
 
 #define GRAIN_SAMPLER_SET 2
 #define GRAIN_UNIFORM_SET 3
+#define Varying(X) layout(location = X) in
 
 #endif
 
@@ -43,6 +45,31 @@ void srand(uint id, uint gen) { grain__rng_state = pcg(id ^ pcg(gen)); }
 float rand() {
     grain__rng_state = pcg(grain__rng_state);
     return float(grain__rng_state) * (1.0 / 4294967296.0);
+}
+
+Schedule schedule(uint local_id, uint pool_size, SystemClock clock) {
+	Schedule s;
+
+	float period = float(pool_size) / clock.rate;
+	float first  = float(local_id) / clock.rate;
+
+	float t_now  = clock.elapsed - first;
+	float t_prev = t_now - clock.dt;
+
+	if (t_now < 0.0) {
+		s.gen = 0u;
+		s.age = 0.0;
+		s.started = false;
+		s.emit = false;
+		return s;
+	}
+
+	float gen_now = floor(t_now / period);
+	s.gen     = uint(gen_now);
+	s.age     = t_now - gen_now * period;
+	s.started = true;
+	s.emit    = (t_prev < 0.0) || (gen_now > floor(t_prev / period));
+	return s;
 }
 
 SystemClock grain__unpack_SystemClock(uvec4 v) {

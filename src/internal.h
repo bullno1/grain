@@ -21,6 +21,8 @@ struct grain_s {
 	CF_Arena arena;
 	const char* last_error;
 
+	CF_ShaderBytecode update_vert_bytecode;
+
 	CK_MAP(grain_module_t*) emitters;
 	CK_MAP(grain_module_t*) affectors;
 	CK_MAP(grain_module_t*) renderers;
@@ -28,9 +30,6 @@ struct grain_s {
 
 void
 grain_set_last_error(grain_t* grain, const char* message);
-
-void
-grain_reset_arena(grain_t* grain);
 
 GRAIN_FORMAT_ATTRIBUTE(2, 3)
 const char*
