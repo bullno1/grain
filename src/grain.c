@@ -709,9 +709,6 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(archetype_update, "\n");
 	sappend    (archetype_update, "void grain_store(ParticleAttrs particle, float birth) {\n");
 	sfmt_append(archetype_update, "\tvec4[%d] grain_packed;\n", num_textures);
-	for (int i = 0; i < num_textures; ++i) {
-		sfmt_append(archetype_update, "\tgrain_packed[%d] = vec4(0.0);\n", i);
-	}
 	sappend    (archetype_update, "\tgrain_pack_ParticleAttrs(grain_packed, particle);\n");
 	sfmt_append(archetype_update, "\tgrain_packed[%d].%c = birth;\n", birth_lane / 4, "xyzw"[birth_lane % 4]);
 	for (int i = 0; i < num_textures; ++i) {
