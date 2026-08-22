@@ -26,7 +26,9 @@ typedef struct {
 	grain_archetype_t* archetype;
 
 	int max_systems;
-	int max_particles_per_system;
+
+	float max_emission_rate;  // upper bound for particles/second
+	float lifetime_budget;    // max lifetime in seconds
 } grain_pool_opts_t;
 
 typedef struct {

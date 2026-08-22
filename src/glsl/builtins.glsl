@@ -47,28 +47,28 @@ float rand() {
     return float(grain_rng_state) * (1.0 / 4294967296.0);
 }
 
-Schedule schedule(uint local_id, uint pool_size, SystemClock clock) {
+Schedule schedule(uint local_id, float period, SystemClock clock) {
 	Schedule s;
+	s.gen = 0u;
+	s.age = 0.0;
+	s.started = false;
+	s.emit = false;
 
-	float period = float(pool_size) / clock.rate;
-	float first  = float(local_id) / clock.rate;
+	float first = float(local_id) / clock.rate;
+	if (first >= period) { return s; }  // slot outside the ring at this rate
 
 	float t_now  = clock.elapsed - first;
 	float t_prev = t_now - clock.dt;
 
-	if (t_now < 0.0) {
-		s.gen = 0u;
-		s.age = 0.0;
-		s.started = false;
-		s.emit = false;
-		return s;
-	}
+	if (t_now < 0.0) { return s; }
 
 	float gen_now = floor(t_now / period);
 	s.gen     = uint(gen_now);
 	s.age     = t_now - gen_now * period;
 	s.started = true;
-	s.emit    = (t_prev < 0.0) || (gen_now > floor(t_prev / period));
+	// The generation counter ticked over since the last update. This covers the first
+	// birth too: t_prev is then negative, so floor() puts the previous generation at -1.
+	s.emit    = gen_now > floor(t_prev / period);
 	return s;
 }
 

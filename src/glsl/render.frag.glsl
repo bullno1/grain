@@ -3,6 +3,7 @@
 
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	int grain_pool_size;
+	float grain_lifetime_budget;
 };
 
 layout(location = 0) flat in uint v_region;
@@ -19,7 +20,7 @@ void main() {
 	ModuleParams params = grain_load_ModuleParams(v_region);
 	SystemClock clock = grain_load_SystemClock(v_region);
 
-	Schedule sch = schedule(v_lid, uint(grain_pool_size), clock);
+	Schedule sch = schedule(v_lid, grain_lifetime_budget, clock);
 	uint gen = sch.gen + clock.gen_base;
 
 	srand(gid, gen);

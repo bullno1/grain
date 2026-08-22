@@ -3,6 +3,7 @@
 
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	int grain_pool_size;  // CF does not support uint uniform
+	float grain_lifetime_budget;
 };
 
 void main() {
@@ -17,7 +18,7 @@ void main() {
 	SystemParams params = grain_load_SystemParams(region);
 	SystemClock clock = grain_load_SystemClock(region);
 
-	Schedule sch = schedule(lid, uint(grain_pool_size), clock);
+	Schedule sch = schedule(lid, grain_lifetime_budget, clock);
 	uint gen = sch.gen + clock.gen_base;
 
 	srand(gid, gen);

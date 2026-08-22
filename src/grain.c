@@ -63,6 +63,7 @@ struct grain_pool_s {
 	grain_pool_t* render_next;
 	bool queued_for_render;
 
+	int pool_size;
 	int num_draws;
 };
 
@@ -1007,10 +1008,26 @@ grain_index_ssbo(grain_ssbo_t* ssbo, int item_size, int index) {
 
 grain_pool_t*
 grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
+	if (opts.max_emission_rate <= 0.f || opts.lifetime_budget <= 0.f) {
+		grain_set_last_error(grain, "max_emission_rate and lifetime_budget must be positive");
+		return NULL;
+	}
+	if ((double)opts.lifetime_budget > GRAIN_MAX_LIFETIME_BUDGET) {
+		grain_set_last_error(grain, grain_sprintf(
+			grain, "lifetime_budget of %.1fs exceeds the %.1fs float precision budget",
+			opts.lifetime_budget, GRAIN_MAX_LIFETIME_BUDGET
+		));
+		return NULL;
+	}
+
+	int pool_size = (int)ceil((double)opts.max_emission_rate * (double)opts.lifetime_budget);
+	if (pool_size < 1) { pool_size = 1; }
+
 	grain_pool_t* pool = cf_alloc(sizeof(grain_pool_t));
 	*pool = (grain_pool_t){
 		.grain = grain,
 		.opts = opts,
+		.pool_size = pool_size,
 	};
 
 	grain_init_ssbo(&pool->update_ssbo, opts.archetype->update_size * opts.max_systems);
@@ -1018,7 +1035,7 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 	grain_init_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t) * opts.max_systems);
 	grain_init_ssbo(&pool->draw_list, sizeof(uint32_t) * opts.max_systems);
 
-	CF_CanvasParams canvas_params = cf_canvas_defaults(opts.max_particles_per_system, opts.max_systems);
+	CF_CanvasParams canvas_params = cf_canvas_defaults(pool_size, opts.max_systems);
 	canvas_params.target_count = opts.archetype->num_textures;
 	for (int i = 0; i < opts.archetype->num_textures; ++i) {
 		canvas_params.targets[i].allocate_mipmaps = false;
@@ -1031,8 +1048,10 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 	pool->canvases[1] = cf_make_canvas(canvas_params);
 
 	pool->material = cf_make_material();
-	cf_material_set_uniform_vs(pool->material, "grain_pool_size", &opts.max_particles_per_system, CF_UNIFORM_TYPE_INT, 1);
-	cf_material_set_uniform_fs(pool->material, "grain_pool_size", &opts.max_particles_per_system, CF_UNIFORM_TYPE_INT, 1);
+	cf_material_set_uniform_vs(pool->material, "grain_pool_size", &pool_size, CF_UNIFORM_TYPE_INT, 1);
+	cf_material_set_uniform_fs(pool->material, "grain_pool_size", &pool_size, CF_UNIFORM_TYPE_INT, 1);
+	cf_material_set_uniform_vs(pool->material, "grain_lifetime_budget", &opts.lifetime_budget, CF_UNIFORM_TYPE_FLOAT, 1);
+	cf_material_set_uniform_fs(pool->material, "grain_lifetime_budget", &opts.lifetime_budget, CF_UNIFORM_TYPE_FLOAT, 1);
 	// TODO: allow override
 	CF_RenderState render_state = cf_render_state_defaults();
 	render_state.primitive_type = CF_PRIMITIVE_TYPE_TRIANGLESTRIP;
@@ -1069,7 +1088,7 @@ grain_create_system(grain_pool_t* pool) {
 		if (!pool->systems[i].used) {
 			grain_system_t* system = &pool->systems[i];
 			system->used = true;
-			grain_init_clock(&pool->clocks[i], pool->opts.max_particles_per_system, 1.0);
+			grain_init_clock(&pool->clocks[i], pool->opts.lifetime_budget, 1.0);
 			return system;
 		}
 	}
@@ -1105,11 +1124,12 @@ grain_tick(grain_system_t* system, float dt_s) {
 	grain_pool_t* pool = system->pool;
 	int index = system - pool->systems;
 
-	grain_advance_clock(&pool->clocks[index], dt_s);
+	// Upload the dt the clock actually applied, never the requested one.
+	double dt = grain_advance_clock(&pool->clocks[index], dt_s);
 
 	grain_clock_entry_t* clock_entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), index);
 	clock_entry->rate = pool->clocks[index].rate;
-	clock_entry->dt = dt_s;
+	clock_entry->dt = (float)dt;
 	clock_entry->elapsed = pool->clocks[index].elapsed;
 	clock_entry->gen_base = pool->clocks[index].gen_base;
 
@@ -1121,9 +1141,17 @@ grain_set_emission_rate(grain_system_t* system, float particles_per_second) {
 	grain_pool_t* pool = system->pool;
 	int index = system - pool->systems;
 
+	// The pool was sized for max_emission_rate; exceeding it would recycle live slots.
+	if (particles_per_second > pool->opts.max_emission_rate) {
+		particles_per_second = pool->opts.max_emission_rate;
+	}
+	// A rate of 0 would make `first` a NaN for slot 0 on the GPU. Floor it instead, which
+	// pushes every other slot past the ring and leaves one particle per period.
+	if (particles_per_second < 1e-6f) { particles_per_second = 1e-6f; }
+
 	if (pool->clocks[index].rate == particles_per_second) { return; }
 
-	grain_set_clock_rate(&pool->clocks[index], pool->opts.max_particles_per_system, particles_per_second);
+	grain_set_clock_rate(&pool->clocks[index], pool->opts.lifetime_budget, particles_per_second);
 
 	grain_clock_entry_t* clock_entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), index);
 	clock_entry->rate = pool->clocks[index].rate;
@@ -1167,7 +1195,7 @@ grain_update_pool(grain_t* grain, grain_pool_t* pool) {
 	};
 	cf_apply_fs_storage_buffers(fs_buffers, CF_ARRAY_SIZE(fs_buffers));
 	// TODO: scissor and only update a small rect
-	// cf_apply_scissor(0, 0, pool->opts.max_particles_per_system, pool->system_hwm);
+	// cf_apply_scissor(0, 0, pool->pool_size, pool->system_hwm);
 	cf_draw_elements_range(0, 3, 1);
 
 	pool->pingpong = !pool->pingpong;
@@ -1353,7 +1381,7 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool, CF_M3x2 transform) {
 	};
 	cf_apply_vs_storage_buffers(storage_buffers, CF_ARRAY_SIZE(storage_buffers));
 	cf_apply_fs_storage_buffers(storage_buffers, CF_ARRAY_SIZE(storage_buffers));
-	cf_draw_elements_range(0, 4, pool->num_draws * pool->opts.max_particles_per_system);
+	cf_draw_elements_range(0, 4, pool->num_draws * pool->pool_size);
 
 	pool->num_draws = 0;
 }

@@ -3,6 +3,7 @@
 // Declared before the archetype include so the renderer module can use grain_transform.
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	int grain_pool_size;  // CF does not support uint uniform
+	float grain_lifetime_budget;
 	mat4 grain_transform; // The caller's 2D transform stack, world -> clip.
 };
 
@@ -26,7 +27,7 @@ void main() {
 	ModuleParams params = grain_load_ModuleParams(region);
 	SystemClock clock = grain_load_SystemClock(region);
 
-	Schedule sch = schedule(lid, uint(grain_pool_size), clock);
+	Schedule sch = schedule(lid, grain_lifetime_budget, clock);
 	uint gen = sch.gen + clock.gen_base;
 
 	srand(gid, gen);
