@@ -109,7 +109,7 @@ grain_set_affector_parameter(
 
 void
 grain_set_renderer_parameter(
-	grain_pool_t* pool,
+	grain_system_t* system,
 	const char* name,
 	void* value
 );

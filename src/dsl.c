@@ -75,20 +75,15 @@ grain_dsl_materialize(grain_t* grain, xincbin_data_t incbin) {
 	return data;
 }
 
-grain_dsl_module_info_t*
-grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
+static CSPV_Result
+grain_dsl_compile(
+	grain_t* grain,
+	grain_vfs_entry_t* vfs,
+	CSPV_Stage stage,
+	const char* entry
+) {
 	grain_cspv_ctx_t ctx = {
-		.vfs = (grain_vfs_entry_t[]){
-			{
-				.name = "internal/builtins.glsl",
-				.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_builtins)),
-			},
-			{
-				.name = "module.glsl",
-				.content = source,
-			},
-			{ 0 }
-		},
+		.vfs = vfs,
 	};
 
 	char stage_str[sizeof("1")];
@@ -107,10 +102,28 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 		.num_defines = 4,
 	};
 
-	CSPV_Result inspect_result = cspv_compile_ex(
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_inspect_stub)),
+	return cspv_compile_ex(entry, stage, &opts);
+}
+
+grain_dsl_module_info_t*
+grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
+	grain_vfs_entry_t vfs[] = {
+		{
+			.name = "internal/builtins.glsl",
+			.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_builtins)),
+		},
+		{
+			.name = "module.glsl",
+			.content = source,
+		},
+		{ 0 }
+	};
+
+	CSPV_Result inspect_result = grain_dsl_compile(
+		grain,
+		vfs,
 		stage,
-		&opts
+		grain_dsl_materialize(grain, XINCBIN_GET(grain_inspect_stub))
 	);
 
 	if (!inspect_result.success) {
@@ -235,45 +248,32 @@ grain_dsl_compile_archetype(
 
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
-		.name = "archetype/update.glsl",
-		.content = update_source,
+		.name = "archetype/render.glsl",
+		.content = render_source,
 
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){ 0 };
 
-	grain_cspv_ctx_t ctx = {
-		.vfs = vfs_entries,
-	};
-
-	char stage_str[sizeof("1")];
-	CSPV_Stage stage;
-
-	CSPV_Options opts = {
-		.user = &ctx,
-		.include_resolve = grain_resolve_include,
-
-		.defines = (CSPV_Define[]) {
-			{ .name = "GRAIN_SHADER_STAGE_VERTEX", .value = "0" },
-			{ .name = "GRAIN_SHADER_STAGE_FRAGMENT", .value = "1" },
-			{ .name = "GRAIN_SHADER_STAGE_COMPUTE", .value = "2" },
-			{ .name = "GRAIN_SHADER_STAGE", .value = stage_str },
-		},
-		.num_defines = 4,
-	};
-
-	stage = CSPV_STAGE_FRAGMENT;
-	snprintf(stage_str, sizeof(stage_str), "%d", stage);
-	update_fs_result = cspv_compile_ex(
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_update_fs)),
-		stage,
-		&opts
+	update_fs_result = grain_dsl_compile(
+		grain,
+		vfs_entries,
+		CSPV_STAGE_FRAGMENT,
+		grain_dsl_materialize(grain, XINCBIN_GET(grain_update_fs))
 	);
 	if (!update_fs_result.success) {
 		grain_set_last_error(grain, grain_strcpy(grain, update_fs_result.error_message));
 		goto fail;
 	}
-	if (update_fs_result.preprocessed) {
-		printf("%s\n", update_fs_result.preprocessed);
+
+	render_vs_result = grain_dsl_compile(
+		grain,
+		vfs_entries,
+		CSPV_STAGE_VERTEX,
+		grain_dsl_materialize(grain, XINCBIN_GET(grain_render_vs))
+	);
+	if (!render_vs_result.success) {
+		grain_set_last_error(grain, grain_strcpy(grain, render_vs_result.error_message));
+		goto fail;
 	}
 
 fail:
