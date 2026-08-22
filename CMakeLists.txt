@@ -5,7 +5,7 @@ set(SOURCES
 )
 
 if (WIN32)
-	set(SOURCES ${SOURCES} "resources.rc")
+	set(SOURCES ${SOURCES} "src/resources.rc")
 endif ()
 
 add_library(grain STATIC EXCLUDE_FROM_ALL "${SOURCES}")
