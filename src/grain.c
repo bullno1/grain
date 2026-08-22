@@ -1199,8 +1199,7 @@ grain_update_pool(grain_t* grain, grain_pool_t* pool) {
 		pool->clock_ssbo.gpu,
 	};
 	cf_apply_fs_storage_buffers(fs_buffers, CF_ARRAY_SIZE(fs_buffers));
-	// TODO: scissor and only update a small rect
-	// cf_apply_scissor(0, 0, pool->pool_size, pool->system_hwm);
+	cf_apply_scissor(0, 0, pool->pool_size, system_hwm + 1);
 	cf_draw_elements_range(0, 3, 1);
 
 	pool->pingpong = !pool->pingpong;
