@@ -1,9 +1,12 @@
 #include "internal/builtins.glsl"
-#include "archetype/render.glsl"
 
+// Declared before the archetype include so the renderer module can use grain_transform.
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	int grain_pool_size;  // CF does not support uint uniform
+	mat4 grain_transform; // The caller's 2D transform stack, world -> clip.
 };
+
+#include "archetype/render.glsl"
 
 layout(location = 0) flat out uint v_region;
 layout(location = 1) flat out uint v_lid;

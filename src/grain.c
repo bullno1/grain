@@ -1294,6 +1294,22 @@ grain_begin_render(grain_t* grain) {
 	grain->render_list = NULL;
 }
 
+static CF_M3x2
+grain_current_transform(void) {
+	int w, h;
+	cf_app_get_size(&w, &h);
+	CF_M3x2 projection = cf_ortho_2d(0.f, 0.f, (float)w, (float)h);
+	return cf_mul_m32(projection, cf_draw_peek());
+}
+
+static void
+grain_transform_to_mat4(CF_M3x2 transform, float* out) {
+	out[0]  = transform.m.x.x; out[1]  = transform.m.x.y; out[2]  = 0.f; out[3]  = 0.f;
+	out[4]  = transform.m.y.x; out[5]  = transform.m.y.y; out[6]  = 0.f; out[7]  = 0.f;
+	out[8]  = 0.f;             out[9]  = 0.f;             out[10] = 1.f; out[11] = 0.f;
+	out[12] = transform.p.x;   out[13] = transform.p.y;   out[14] = 0.f; out[15] = 1.f;
+}
+
 void
 grain_render(grain_system_t* system) {
 	grain_pool_t* pool = system->pool;
@@ -1311,7 +1327,7 @@ grain_render(grain_system_t* system) {
 }
 
 static void
-grain_render_pool(grain_t* grain, grain_pool_t* pool) {
+grain_render_pool(grain_t* grain, grain_pool_t* pool, CF_M3x2 transform) {
 	int system_hwm = grain_find_system_hwm(pool);
 	grain_sync_ssbo(&pool->render_ssbo, pool->opts.archetype->render_size * (system_hwm + 1));
 	grain_sync_ssbo(&pool->draw_list, sizeof(uint32_t) * pool->num_draws);
@@ -1324,7 +1340,11 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool) {
 		cf_material_set_texture_vs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
 		cf_material_set_texture_fs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
 	}
-	// TODO: pass the current transform stack
+
+	float transform_mat4[16];
+	grain_transform_to_mat4(transform, transform_mat4);
+	cf_material_set_uniform_vs(pool->material, "grain_transform", transform_mat4, CF_UNIFORM_TYPE_MAT4, 1);
+
 	cf_apply_shader(pool->opts.archetype->shaders.render_shader, pool->material);
 	CF_StorageBuffer storage_buffers[] = {
 		pool->render_ssbo.gpu,
@@ -1340,11 +1360,13 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool) {
 
 void
 grain_end_render(grain_t* grain) {
+	CF_M3x2 transform = grain_current_transform();
+
 	for (
 		grain_pool_t* itr = grain->render_list;
 		itr != NULL;
 	) {
-		grain_render_pool(grain, itr);
+		grain_render_pool(grain, itr, transform);
 
 		grain_pool_t* next = itr->render_next;
 		itr->render_next = NULL;
