@@ -786,10 +786,6 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend    (archetype_render, "}\n");
 	sappend    (archetype_render, "#endif\n");
 
-	printf("// Common\n%s\n", archetype_common);
-	printf("// Update\n%s\n", archetype_update);
-	printf("// Render\n%s\n", archetype_render);
-
 	grain_dsl_archetype_t* dsl_archetype = grain_dsl_compile_archetype(
 		grain,
 		spec,

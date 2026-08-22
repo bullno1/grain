@@ -5,11 +5,14 @@ layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	uint grain__pool_size;
 };
 
+layout(location = 0) flat out uint v_region;
+layout(location = 1) flat out uint v_lid;
+
 void main() {
 	uint inst   = uint(gl_InstanceIndex);
-	uint packed = inst / grain__pool_size;   // position in the culled draw list
-	uint lid    = inst % grain__pool_size;   // slot within the system's pool
-	uint region = grain__draw_list[packed / 4][packed % 4];  // which texture region it occupies
+	uint packed = inst / grain__pool_size; // position in the culled draw list
+	uint lid    = inst % grain__pool_size; // slot within the system's pool
+	uint region = grain__load_draw_region(packed);  // which texture region it occupies
 
 	uint flat   = region * grain__pool_size + lid;
 
@@ -30,9 +33,12 @@ void main() {
 	ctx.dt = sch.emit ? sch.age : clock.dt;
 	ctx.time = clock.elapsed - (sch.emit ? (clock.dt - sch.age) : 0.0);
 
+	v_region = region;
+	v_lid = lid;
+
 	if (sch.started) {
 		process(particle, params, ctx);
 	} else {
-		gl_Position = vec4(2.0, 2.0, 2.0, 0.0);
+		cull();
 	}
 }

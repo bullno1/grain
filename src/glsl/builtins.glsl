@@ -88,6 +88,10 @@ vec2 quad() {
 	return corner - 0.5; // [-0.5, 0.5]
 }
 
+void cull() {
+	gl_Position = vec4(2.0, 2.0, 2.0, 0.0);
+}
+
 #elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT
 
 vec4 grain_Color;

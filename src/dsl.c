@@ -276,6 +276,17 @@ grain_dsl_compile_archetype(
 		goto fail;
 	}
 
+	render_fs_result = grain_dsl_compile(
+		grain,
+		vfs_entries,
+		CSPV_STAGE_FRAGMENT,
+		grain_dsl_materialize(grain, XINCBIN_GET(grain_render_fs))
+	);
+	if (!render_fs_result.success) {
+		grain_set_last_error(grain, grain_strcpy(grain, render_fs_result.error_message));
+		goto fail;
+	}
+
 fail:
 	cspv_free(&update_fs_result);
 	cspv_free(&render_vs_result);
