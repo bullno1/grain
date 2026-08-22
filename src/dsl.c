@@ -12,10 +12,10 @@ typedef struct {
 } grain_cspv_ctx_t;
 
 typedef enum {
-	GRAIN_INSPECT_MODULE_NAME,
-	GRAIN_INSPECT_REQUIRES,
-	GRAIN_INSPECT_PARAMS,
-} grain_inspect_mode_t;
+	GRAIN_COMPILE_INSPECT,
+	GRAIN_COMPILE_DESKTOP,
+	GRAIN_COMPILE_WEB,
+} grain_compile_mode_t;
 
 static const char*
 grain_resolve_include(const char* name, void* user) {
@@ -80,6 +80,7 @@ grain_dsl_compile(
 	grain_t* grain,
 	grain_vfs_entry_t* vfs,
 	CSPV_Stage stage,
+	grain_compile_mode_t mode,
 	const char* entry
 ) {
 	grain_cspv_ctx_t ctx = {
@@ -98,11 +99,200 @@ grain_dsl_compile(
 			{ .name = "GRAIN_SHADER_STAGE_FRAGMENT", .value = "1" },
 			{ .name = "GRAIN_SHADER_STAGE_COMPUTE", .value = "2" },
 			{ .name = "GRAIN_SHADER_STAGE", .value = stage_str },
+			{ .name = "CF_GLES", .value = "1" },
 		},
-		.num_defines = 4,
+		.num_defines = mode == GRAIN_COMPILE_WEB ? 5 : 4,
+
+		.emit_msl = mode == GRAIN_COMPILE_DESKTOP,
+		.emit_hlsl = mode == GRAIN_COMPILE_DESKTOP,
+		.emit_glsl300 = mode == GRAIN_COMPILE_WEB,
 	};
 
 	return cspv_compile_ex(entry, stage, &opts);
+}
+
+bool
+grain_dsl_compile_for_cf(
+	grain_t* grain,
+	grain_vfs_entry_t* vfs,
+	CSPV_Stage stage,
+	const char* entry,
+	CF_ShaderBytecode* out
+) {
+	CSPV_Result desktop_result = grain_dsl_compile(grain, vfs, stage, GRAIN_COMPILE_DESKTOP, entry);
+	if (!desktop_result.success) {
+		grain_set_last_error(grain, grain_strcpy(grain, desktop_result.error_message));
+		return false;
+	}
+
+	CSPV_Result web_result = grain_dsl_compile(grain, vfs, stage, GRAIN_COMPILE_WEB, entry);
+	if (!web_result.success) {
+		grain_set_last_error(grain, grain_strcpy(grain, web_result.error_message));
+		cspv_free(&desktop_result);
+		return false;
+	}
+
+	CSPV_Result r = desktop_result;
+	r.glsl300 = web_result.glsl300;
+
+	// Lifted from cute-shaderc
+
+	// Bytecode blob (cf_alloc'd; freed with cf_free() by cute_shader_free_result).
+	size_t bytecode_size = r.word_count * sizeof(uint32_t);
+	void* bytecode = cf_alloc(bytecode_size);
+	memcpy(bytecode, r.spirv, bytecode_size);
+
+	// GLSL 300 es source, from cute_spirv's transpiler backend (requested via
+	// opts.emit_glsl300 above; NULL when skipped).
+	char* glsl300_src = NULL;
+	size_t glsl300_src_size = 0;
+	if (r.glsl300) {
+		glsl300_src_size = strlen(r.glsl300);
+		glsl300_src = (char*)cf_alloc(glsl300_src_size + 1);
+		memcpy(glsl300_src, r.glsl300, glsl300_src_size + 1);
+	}
+
+	// HLSL source likewise.
+	char* hlsl_src = NULL;
+	size_t hlsl_src_size = 0;
+	if (r.hlsl) {
+		hlsl_src_size = strlen(r.hlsl);
+		hlsl_src = (char*)cf_alloc(hlsl_src_size + 1);
+		memcpy(hlsl_src, r.hlsl, hlsl_src_size + 1);
+	}
+
+	// MSL source likewise.
+	char* msl_src = NULL;
+	size_t msl_src_size = 0;
+	if (r.msl) {
+		msl_src_size = strlen(r.msl);
+		msl_src = (char*)cf_alloc(msl_src_size + 1);
+		memcpy(msl_src, r.msl, msl_src_size + 1);
+	}
+
+	// Reflection: map CSPV_Reflection to CF_ShaderInfo. Arrays are cf_alloc'd (freed by
+	// cute_shader_free_result); names are interned strings from the compiler, which
+	// are immortal -- no copies, and free_result must not free them.
+	CSPV_Reflection* rf = &r.reflection;
+
+	int num_samplers = (int)asize(rf->samplers);
+	int num_storage_textures = 0;
+	int num_readwrite_storage_textures = 0;
+	for (int i = 0; i < (int)asize(rf->storage_images); ++i) {
+		if (rf->storage_images[i].readonly) ++num_storage_textures;
+		else ++num_readwrite_storage_textures;
+	}
+	int num_storage_buffers = 0;
+	int num_readwrite_storage_buffers = 0;
+	for (int i = 0; i < (int)asize(rf->storage_buffers); ++i) {
+		if (rf->storage_buffers[i].readonly) ++num_storage_buffers;
+		else ++num_readwrite_storage_buffers;
+	}
+
+	// Combined samplers, sorted by binding so array index matches the SDL_GPU slot.
+	int num_images = num_samplers;
+	const char** image_names = NULL;
+	int* image_binding_slots = NULL;
+	if (num_images > 0) {
+		image_names = (const char**)cf_alloc(sizeof(char*) * num_images);
+		image_binding_slots = (int*)cf_alloc(sizeof(int) * num_images);
+		for (int i = 0; i < num_images; ++i) {
+			image_names[i] = rf->samplers[i].name;
+			image_binding_slots[i] = rf->samplers[i].binding;
+		}
+		for (int i = 0; i < num_images - 1; ++i) {
+			for (int j = i + 1; j < num_images; ++j) {
+				if (image_binding_slots[j] < image_binding_slots[i]) {
+					const char* tn = image_names[i]; image_names[i] = image_names[j]; image_names[j] = tn;
+					int tb = image_binding_slots[i]; image_binding_slots[i] = image_binding_slots[j]; image_binding_slots[j] = tb;
+				}
+			}
+		}
+	}
+
+	int num_uniforms = (int)asize(rf->uniform_blocks);
+	CF_ShaderUniformInfo* uniforms = NULL;
+	if (num_uniforms > 0) {
+		uniforms = (CF_ShaderUniformInfo*)cf_alloc(sizeof(CF_ShaderUniformInfo) * num_uniforms);
+		for (int i = 0; i < num_uniforms; ++i) {
+			uniforms[i].block_name = rf->uniform_blocks[i].name;
+			uniforms[i].block_index = rf->uniform_blocks[i].binding;
+			uniforms[i].block_size = rf->uniform_blocks[i].size;
+			uniforms[i].num_members = rf->uniform_blocks[i].num_members;
+		}
+	}
+
+	int num_uniform_members = (int)asize(rf->uniform_members);
+	CF_ShaderUniformMemberInfo* uniform_members = NULL;
+	if (num_uniform_members > 0) {
+		uniform_members = (CF_ShaderUniformMemberInfo*)cf_alloc(sizeof(CF_ShaderUniformMemberInfo) * num_uniform_members);
+		for (int i = 0; i < num_uniform_members; ++i) {
+			uniform_members[i].name = rf->uniform_members[i].name;
+			uniform_members[i].type = (CF_ShaderInfoDataType)rf->uniform_members[i].type;
+			uniform_members[i].offset = rf->uniform_members[i].offset;
+			uniform_members[i].array_length = rf->uniform_members[i].array_length;
+		}
+	}
+
+	int num_inputs = (int)asize(rf->inputs);
+	CF_ShaderInputInfo* inputs = NULL;
+	if (num_inputs > 0) {
+		inputs = (CF_ShaderInputInfo*)cf_alloc(sizeof(CF_ShaderInputInfo) * num_inputs);
+		for (int i = 0; i < num_inputs; ++i) {
+			inputs[i].name = rf->inputs[i].name;
+			inputs[i].location = rf->inputs[i].location;
+			inputs[i].format = (CF_ShaderInfoDataType)rf->inputs[i].type;
+		}
+	}
+
+	// Captured before cspv_free wipes the result.
+	int local_size[3] = { r.reflection.local_size[0], r.reflection.local_size[1], r.reflection.local_size[2] };
+
+	cspv_free(&desktop_result);
+	cspv_free(&web_result);
+
+	out->content = (uint8_t*)bytecode;
+	out->size = bytecode_size;
+	out->glsl300_src = glsl300_src;
+	out->glsl300_src_size = glsl300_src_size;
+	out->hlsl_src = hlsl_src;
+	out->hlsl_src_size = hlsl_src_size;
+	out->msl_src = msl_src;
+	out->msl_src_size = msl_src_size;
+	out->shader_info.local_size[0] = local_size[0];
+	out->shader_info.local_size[1] = local_size[1];
+	out->shader_info.local_size[2] = local_size[2];
+	out->shader_info.num_samplers = num_samplers;
+	out->shader_info.num_storage_textures = num_storage_textures;
+	out->shader_info.num_storage_buffers = num_storage_buffers;
+	out->shader_info.num_readwrite_storage_textures = num_readwrite_storage_textures;
+	out->shader_info.num_readwrite_storage_buffers = num_readwrite_storage_buffers;
+	out->shader_info.num_images = num_images;
+	out->shader_info.image_names = image_names;
+	out->shader_info.image_binding_slots = image_binding_slots;
+	out->shader_info.num_uniforms = num_uniforms;
+	out->shader_info.uniforms = uniforms;
+	out->shader_info.num_uniform_members = num_uniform_members;
+	out->shader_info.uniform_members = uniform_members;
+	out->shader_info.num_inputs = num_inputs;
+	out->shader_info.inputs = inputs;
+	return true;
+}
+
+static void
+grain_free_bytecode(CF_ShaderBytecode bytecode) {
+	// Reflection names are interned strings (immortal) -- only the arrays are freed.
+	CF_ShaderInfo* shader_info = &bytecode.shader_info;
+	cf_free(shader_info->inputs);
+	cf_free(shader_info->uniform_members);
+	cf_free(shader_info->uniforms);
+	cf_free(shader_info->image_names);
+	cf_free(shader_info->image_binding_slots);
+
+	cf_free((void*)bytecode.glsl300_src);
+	cf_free((void*)bytecode.hlsl_src);
+	cf_free((void*)bytecode.msl_src);
+	cf_free((void*)bytecode.content);
 }
 
 grain_dsl_module_info_t*
@@ -123,6 +313,7 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 		grain,
 		vfs,
 		stage,
+		GRAIN_COMPILE_INSPECT,
 		grain_dsl_materialize(grain, XINCBIN_GET(grain_inspect_stub))
 	);
 
@@ -209,10 +400,6 @@ grain_dsl_compile_archetype(
 	const char* update_source,
 	const char* render_source
 ) {
-	CSPV_Result update_fs_result = { 0 };
-	CSPV_Result render_vs_result = { 0 };
-	CSPV_Result render_fs_result = { 0 };
-
 	int num_vfs_entries = spec.num_emitters + spec.num_affectors + 6;
 	int vfs_index = 0;
 	grain_vfs_entry_t* vfs_entries = cf_arena_alloc(&grain->arena, num_vfs_entries * sizeof(grain_vfs_entry_t));
@@ -254,43 +441,44 @@ grain_dsl_compile_archetype(
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){ 0 };
 
-	update_fs_result = grain_dsl_compile(
+	CF_ShaderBytecode update_fs_bytecode = { 0 };
+	CF_ShaderBytecode render_vs_bytecode = { 0 };
+	CF_ShaderBytecode render_fs_bytecode = { 0 };
+
+	if (!grain_dsl_compile_for_cf(
 		grain,
 		vfs_entries,
 		CSPV_STAGE_FRAGMENT,
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_update_fs))
-	);
-	if (!update_fs_result.success) {
-		grain_set_last_error(grain, grain_strcpy(grain, update_fs_result.error_message));
+		grain_dsl_materialize(grain, XINCBIN_GET(grain_update_fs)),
+		&update_fs_bytecode
+	)) {
 		goto fail;
 	}
 
-	render_vs_result = grain_dsl_compile(
+	if (!grain_dsl_compile_for_cf(
 		grain,
 		vfs_entries,
 		CSPV_STAGE_VERTEX,
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_render_vs))
-	);
-	if (!render_vs_result.success) {
-		grain_set_last_error(grain, grain_strcpy(grain, render_vs_result.error_message));
+		grain_dsl_materialize(grain, XINCBIN_GET(grain_render_vs)),
+		&render_vs_bytecode
+	)) {
 		goto fail;
 	}
 
-	render_fs_result = grain_dsl_compile(
+	if (!grain_dsl_compile_for_cf(
 		grain,
 		vfs_entries,
 		CSPV_STAGE_FRAGMENT,
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_render_fs))
-	);
-	if (!render_fs_result.success) {
-		grain_set_last_error(grain, grain_strcpy(grain, render_fs_result.error_message));
+		grain_dsl_materialize(grain, XINCBIN_GET(grain_render_fs)),
+		&render_fs_bytecode
+	)) {
 		goto fail;
 	}
 
 fail:
-	cspv_free(&update_fs_result);
-	cspv_free(&render_vs_result);
-	cspv_free(&render_fs_result);
+	grain_free_bytecode(update_fs_bytecode);
+	grain_free_bytecode(render_vs_bytecode);
+	grain_free_bytecode(render_fs_bytecode);
 	return NULL;
 }
 
