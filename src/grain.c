@@ -26,8 +26,7 @@ typedef struct {
 
 struct grain_system_s {
 	grain_pool_t* pool;
-	int update_gen;
-	int render_gen;
+	bool used;  // TODO: pack this into the pointer
 };
 
 typedef struct {
@@ -51,6 +50,11 @@ struct grain_pool_s {
 
 	grain_system_t* systems;
 	grain_particle_clock_t* clocks;
+
+	grain_pool_t* update_next;
+	grain_pool_t* render_next;
+
+	int num_draws;
 };
 
 typedef struct {
@@ -901,20 +905,31 @@ grain_cleanup_ssbo(grain_ssbo_t* ssbo) {
 	cf_free(ssbo->cpu);
 }
 
+static void
+grain_sync_ssbo(grain_ssbo_t* ssbo) {
+	cf_update_storage_buffer(ssbo->gpu, ssbo->cpu, ssbo->dirty_size_hwm);
+	ssbo->dirty_size_hwm = 0;
+}
+
+static void*
+grain_index_ssbo(grain_ssbo_t* ssbo, int item_size, int index) {
+	char* cpu_mem = (char*)ssbo->cpu + item_size * index;
+	ssbo->dirty_size_hwm = cf_max((index + 1) * item_size, ssbo->dirty_size_hwm);
+	return cpu_mem;
+}
+
 grain_pool_t*
 grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 	grain_pool_t* pool = cf_alloc(sizeof(grain_pool_t));
 	*pool = (grain_pool_t){
 		.grain = grain,
 		.opts = opts,
-
 	};
 
 	grain_init_ssbo(&pool->update_ssbo, opts.archetype->update_size * opts.max_systems);
 	grain_init_ssbo(&pool->render_ssbo, opts.archetype->render_size * opts.max_systems);
 	grain_init_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t) * opts.max_systems);
 	grain_init_ssbo(&pool->draw_list, sizeof(uint32_t) * opts.max_systems);
-
 
 	CF_CanvasParams canvas_params = cf_canvas_defaults(opts.max_particles_per_system, opts.max_systems);
 	canvas_params.target_count = opts.archetype->num_textures;
@@ -925,15 +940,240 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 		canvas_params.targets[i].wrap_v = CF_WRAP_MODE_CLAMP_TO_EDGE;
 		canvas_params.targets[i].pixel_format = CF_PIXEL_FORMAT_R32G32B32A32_FLOAT;
 	}
+	pool->canvases[0] = cf_make_canvas(canvas_params);
+	pool->canvases[1] = cf_make_canvas(canvas_params);
+
+	pool->material = cf_make_material();
+	cf_material_set_uniform_vs(pool->material, "grain_pool_size", &opts.max_particles_per_system, CF_UNIFORM_TYPE_INT, 1);
+	cf_material_set_uniform_fs(pool->material, "grain_pool_size", &opts.max_particles_per_system, CF_UNIFORM_TYPE_INT, 1);
+	// TODO: allow override
+	CF_RenderState render_state = cf_render_state_defaults();
+	render_state.primitive_type = CF_PRIMITIVE_TYPE_TRIANGLESTRIP;
+	cf_material_set_render_state(pool->material, render_state);
+
+	pool->systems = cf_alloc(sizeof(grain_system_t) * opts.max_systems);
+	memset(pool->systems, 0, sizeof(grain_system_t) * opts.max_systems);
+	for (int i = 0; i < opts.max_systems; ++i) {
+		pool->systems[i].pool = pool;
+	}
+
+	pool->clocks = cf_alloc(sizeof(grain_particle_clock_t) * opts.max_systems);
 
 	return pool;
 }
 
 void
 grain_destroy_pool(grain_pool_t* pool) {
+	cf_free(pool->clocks);
+	cf_free(pool->systems);
+	cf_destroy_material(pool->material);
+	cf_destroy_canvas(pool->canvases[0]);
+	cf_destroy_canvas(pool->canvases[1]);
 	grain_cleanup_ssbo(&pool->update_ssbo);
 	grain_cleanup_ssbo(&pool->render_ssbo);
 	grain_cleanup_ssbo(&pool->clock_ssbo);
 	grain_cleanup_ssbo(&pool->draw_list);
 	cf_free(pool);
+}
+
+grain_system_t*
+grain_create_system(grain_pool_t* pool) {
+	for (int i = 0; i < pool->opts.max_systems; ++i) {
+		if (!pool->systems[i].used) {
+			grain_system_t* system = &pool->systems[i];
+			system->used = true;
+			grain_init_clock(&pool->clocks[i], pool->opts.max_particles_per_system, 1.0);
+			return system;
+		}
+	}
+
+	return NULL;
+}
+
+void
+grain_destroy_system(grain_system_t* system) {
+	if (system == NULL) { return; }
+
+	system->used = false;
+}
+
+static void
+grain_touch(grain_pool_t* pool) {
+	// Link pool to update list
+	if (pool->update_next == NULL) {
+		grain_t* grain = pool->grain;
+		pool->update_next = grain->update_list;
+		grain->update_list = pool;
+	}
+}
+
+void
+grain_begin_update(grain_t* grain) {
+	grain->update_list = NULL;
+}
+
+void
+grain_tick(grain_system_t* system, float dt_s) {
+	grain_pool_t* pool = system->pool;
+	int index = system - pool->systems;
+
+	grain_advance_clock(&pool->clocks[index], dt_s);
+
+	grain_clock_entry_t* clock_entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), index);
+	clock_entry->dt = dt_s;
+	clock_entry->elapsed = pool->clocks[index].elapsed;
+	clock_entry->gen_base = pool->clocks[index].gen_base;
+
+	grain_touch(system->pool);
+}
+
+void
+grain_set_emission_rate(grain_system_t* system, float particles_per_second) {
+	grain_pool_t* pool = system->pool;
+	int index = system - pool->systems;
+
+	if (pool->clocks[index].rate == particles_per_second) { return; }
+
+	grain_set_clock_rate(&pool->clocks[index], pool->opts.max_particles_per_system, particles_per_second);
+
+	grain_clock_entry_t* clock_entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), index);
+	clock_entry->elapsed = pool->clocks[index].elapsed;
+	clock_entry->gen_base = pool->clocks[index].gen_base;
+
+	grain_touch(system->pool);
+}
+
+static void
+grain_update_pool(grain_t* grain, grain_pool_t* pool) {
+	grain_sync_ssbo(&pool->update_ssbo);
+	grain_sync_ssbo(&pool->clock_ssbo);
+
+	CF_Canvas src_canvas = pool->canvases[pool->pingpong ? 0 : 1];
+	CF_Canvas dst_canvas = pool->canvases[pool->pingpong ? 1 : 0];
+
+	cf_apply_canvas(dst_canvas, false);
+	cf_apply_mesh(grain->dummy_mesh);
+	for (int i = 0; i < pool->opts.archetype->num_textures; ++i) {
+		char name[256];
+		snprintf(name, sizeof(name), "grain_texture_%d", i);
+		cf_material_set_texture_vs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
+		cf_material_set_texture_fs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
+	}
+	cf_apply_shader(pool->opts.archetype->shaders.update_shader, pool->material);
+	CF_StorageBuffer fs_buffers[] = {
+		pool->update_ssbo.gpu,
+		pool->clock_ssbo.gpu,
+	};
+	cf_apply_fs_storage_buffers(fs_buffers, CF_ARRAY_SIZE(fs_buffers));
+	// TODO: scissor and only update a small rect
+	// cf_apply_scissor(0, 0, pool->opts.max_particles_per_system, pool->system_hwm);
+	cf_draw_elements_range(0, 3, 1);
+
+	pool->pingpong = !pool->pingpong;
+}
+
+void
+grain_set_emitter_parameter(
+	grain_system_t* system,
+	int emitter_index,
+	const char* name,
+	const void* value
+) {
+}
+
+void
+grain_set_affector_parameter(
+	grain_system_t* system,
+	int affector_index,
+	const char* name,
+	const void* value
+) {
+}
+
+void
+grain_set_renderer_parameter(
+	grain_system_t* system,
+	const char* name,
+	const void* value
+) {
+}
+
+void
+grain_end_update(grain_t* grain) {
+	for (
+		grain_pool_t* itr = grain->update_list;
+		itr != NULL;
+	) {
+		grain_pool_t* next = itr->update_next;
+		itr->update_next = NULL;
+
+		grain_update_pool(grain, itr);
+
+		itr = next;
+	}
+
+	grain->update_list = NULL;
+}
+
+void
+grain_begin_render(grain_t* grain) {
+	grain->render_list = NULL;
+}
+
+void
+grain_render(grain_system_t* system) {
+	grain_pool_t* pool = system->pool;
+	grain_t* grain = pool->grain;
+	int index = system - pool->systems;
+
+	uint32_t* draw_list_item = grain_index_ssbo(&pool->draw_list, sizeof(uint32_t), pool->num_draws++);
+	*draw_list_item = index;
+
+	if (pool->render_next == NULL) {
+		pool->render_next = grain->render_list;
+		grain->render_list = pool;
+	}
+}
+
+static void
+grain_render_pool(grain_t* grain, grain_pool_t* pool) {
+	grain_sync_ssbo(&pool->draw_list);
+	grain_sync_ssbo(&pool->render_ssbo);
+
+	cf_apply_mesh(grain->dummy_mesh);
+	CF_Canvas src_canvas = pool->canvases[pool->pingpong ? 0 : 1];
+	for (int i = 0; i < pool->opts.archetype->num_textures; ++i) {
+		char name[256];
+		snprintf(name, sizeof(name), "grain_texture_%d", i);
+		cf_material_set_texture_vs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
+		cf_material_set_texture_fs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
+	}
+	// TODO: pass the current transform stack
+	cf_apply_shader(pool->opts.archetype->shaders.render_shader, pool->material);
+	CF_StorageBuffer storage_buffers[] = {
+		pool->render_ssbo.gpu,
+		pool->clock_ssbo.gpu,
+	};
+	cf_apply_vs_storage_buffers(storage_buffers, CF_ARRAY_SIZE(storage_buffers));
+	cf_apply_fs_storage_buffers(storage_buffers, CF_ARRAY_SIZE(storage_buffers));
+	cf_draw_elements_range(0, 4, pool->num_draws * pool->opts.max_particles_per_system);
+
+	pool->num_draws = 0;
+}
+
+void
+grain_end_render(grain_t* grain) {
+	for (
+		grain_pool_t* itr = grain->render_list;
+		itr != NULL;
+	) {
+		grain_pool_t* next = itr->render_next;
+		itr->render_next = NULL;
+
+		grain_render_pool(grain, itr);
+
+		itr = next;
+	}
+
+	grain->render_list = NULL;
 }

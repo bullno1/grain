@@ -28,7 +28,7 @@ typedef struct {
 
 	int max_systems;
 	int max_particles_per_system;
-} grain_pool_opts;
+} grain_pool_opts_t;
 
 typedef struct {
 	const char* name;
@@ -74,7 +74,7 @@ grain_archetype_info_t
 grain_inspect_archetype(grain_archetype_t* archetype);
 
 grain_pool_t*
-grain_create_pool(grain_t* grain, grain_pool_opts opts);
+grain_create_pool(grain_t* grain, grain_pool_opts_t opts);
 
 void
 grain_destroy_pool(grain_pool_t* pool);
@@ -84,6 +84,9 @@ grain_create_system(grain_pool_t* pool);
 
 void
 grain_destroy_system(grain_system_t* system);
+
+void
+grain_begin_update(grain_t* grain);
 
 void
 grain_tick(grain_system_t* system, float dt_s);
@@ -96,7 +99,7 @@ grain_set_emitter_parameter(
 	grain_system_t* system,
 	int emitter_index,
 	const char* name,
-	void* value
+	const void* value
 );
 
 void
@@ -104,18 +107,18 @@ grain_set_affector_parameter(
 	grain_system_t* system,
 	int affector_index,
 	const char* name,
-	void* value
+	const void* value
 );
 
 void
 grain_set_renderer_parameter(
 	grain_system_t* system,
 	const char* name,
-	void* value
+	const void* value
 );
 
 void
-grain_update(grain_t* grain);
+grain_end_update(grain_t* grain);
 
 void
 grain_begin_render(grain_t* grain);

@@ -20,12 +20,17 @@ struct grain_s {
 	CF_Mesh dummy_mesh;
 	CF_Arena arena;
 	const char* last_error;
+	int render_gen;
 
 	CF_ShaderBytecode update_vert_bytecode;
 
 	CK_MAP(grain_module_t*) emitters;
 	CK_MAP(grain_module_t*) affectors;
 	CK_MAP(grain_module_t*) renderers;
+	CK_MAP(grain_archetype_t*) archetypes;
+
+	grain_pool_t* update_list;
+	grain_pool_t* render_list;
 };
 
 void
