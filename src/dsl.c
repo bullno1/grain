@@ -400,7 +400,7 @@ grain_dsl_compile_archetype(
 	const char* common_source,
 	const char* update_source,
 	const char* render_source,
-	grain_dsl_archetype_t* out
+	grain_dsl_archetype_shaders_t* out
 ) {
 	int num_vfs_entries = spec.num_emitters + spec.num_affectors + 6;
 	int vfs_index = 0;
@@ -480,8 +480,8 @@ grain_dsl_compile_archetype(
 	out->update_frag_bytecode = update_fs_bytecode;
 	out->render_vert_bytecode = render_vs_bytecode;
 	out->render_frag_bytecode = render_fs_bytecode;
-	out->render_shader = cf_make_shader_from_bytecode(render_vs_bytecode, render_fs_bytecode);
 	out->update_shader = cf_make_shader_from_bytecode(grain_update_vert_bytecode, update_fs_bytecode);
+	out->render_shader = cf_make_shader_from_bytecode(render_vs_bytecode, render_fs_bytecode);
 	return true;
 
 fail:

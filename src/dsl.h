@@ -23,7 +23,7 @@ typedef struct {
 	CF_ShaderBytecode update_frag_bytecode;
 	CF_ShaderBytecode render_vert_bytecode;
 	CF_ShaderBytecode render_frag_bytecode;
-} grain_dsl_archetype_t;
+} grain_dsl_archetype_shaders_t;
 
 grain_dsl_module_info_t*
 grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage);
@@ -35,7 +35,7 @@ grain_dsl_compile_archetype(
 	const char* common_source,
 	const char* update_source,
 	const char* render_source,
-	grain_dsl_archetype_t* out
+	grain_dsl_archetype_shaders_t* out
 );
 
 void

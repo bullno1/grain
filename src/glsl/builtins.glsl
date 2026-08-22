@@ -32,7 +32,7 @@ struct Schedule {
     bool  emit;
 };
 
-uint grain__rng_state;
+uint grain_rng_state;
 
 uint pcg(uint v) {
     uint state = v * 747796405u + 2891336453u;
@@ -40,11 +40,11 @@ uint pcg(uint v) {
     return (word >> 22u) ^ word;
 }
 
-void srand(uint id, uint gen) { grain__rng_state = pcg(id ^ pcg(gen)); }
+void srand(uint id, uint gen) { grain_rng_state = pcg(id ^ pcg(gen)); }
 
 float rand() {
-    grain__rng_state = pcg(grain__rng_state);
-    return float(grain__rng_state) * (1.0 / 4294967296.0);
+    grain_rng_state = pcg(grain_rng_state);
+    return float(grain_rng_state) * (1.0 / 4294967296.0);
 }
 
 Schedule schedule(uint local_id, uint pool_size, SystemClock clock) {
@@ -72,7 +72,7 @@ Schedule schedule(uint local_id, uint pool_size, SystemClock clock) {
 	return s;
 }
 
-SystemClock grain__unpack_SystemClock(uvec4 v) {
+SystemClock grain_unpack_SystemClock(uvec4 v) {
 	SystemClock clock;
 	clock.rate = uintBitsToFloat(v.x);
 	clock.elapsed = uintBitsToFloat(v.y);

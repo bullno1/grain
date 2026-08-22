@@ -2,27 +2,27 @@
 #include "archetype/render.glsl"
 
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
-	int grain__pool_size;
+	int grain_pool_size;
 };
 
 layout(location = 0) flat in uint v_region;
 layout(location = 1) flat in uint v_lid;
 
-layout(location = 0) out vec4 output;
+layout(location = 0) out vec4 result;
 
 void main() {
-	uint flat   = v_region * uint(grain__pool_size) + v_lid;
-	ivec2 size  = textureSize(grain__texture_0, 0);
-	ivec2 texel = ivec2(int(flat) % size.x, int(flat) / size.x);
+	uint gid    = v_region * uint(grain_pool_size) + v_lid;
+	ivec2 size  = textureSize(grain_texture_0, 0);
+	ivec2 texel = ivec2(int(gid) % size.x, int(gid) / size.x);
 
-	ParticleAttrs particle = grain__load_ParticleAttrs(texel);
-	ModuleParams params = grain__load_ModuleParams(v_region);
-	SystemClock clock = grain__load_SystemClock(v_region);
+	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
+	ModuleParams params = grain_load_ModuleParams(v_region);
+	SystemClock clock = grain_load_SystemClock(v_region);
 
-	Schedule sch = schedule(v_lid, uint(grain__pool_size), clock);
+	Schedule sch = schedule(v_lid, uint(grain_pool_size), clock);
 	uint gen = sch.gen + clock.gen_base;
 
-	srand(flat, gen);
+	srand(gid, gen);
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;
@@ -30,5 +30,5 @@ void main() {
 	ctx.time = clock.elapsed - (sch.emit ? (clock.dt - sch.age) : 0.0);
 
 	process(particle, params, ctx);
-	output = grain_Color;
+	result = grain_Color;
 }
