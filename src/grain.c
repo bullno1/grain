@@ -12,6 +12,12 @@ struct grain_archetype_s {
 	grain_dsl_archetype_shaders_t shaders;
 	bool own_bytecode;
 
+	CK_DYNA grain_module_info_t* emitters;
+	CK_DYNA grain_module_info_t* affectors;
+	        grain_module_info_t  renderer;
+	CK_DYNA grain_param_info_t* params;
+	CK_DYNA int* params_offsets;
+
 	int num_textures;
 	int update_size;
 	int render_size;
@@ -32,7 +38,7 @@ struct grain_system_s {
 typedef struct {
 	CF_StorageBuffer gpu;
 	void* cpu;
-	int dirty_size_hwm;
+	bool dirty;
 } grain_ssbo_t;
 
 struct grain_pool_s {
@@ -52,7 +58,10 @@ struct grain_pool_s {
 	grain_particle_clock_t* clocks;
 
 	grain_pool_t* update_next;
+	bool queued_for_update;
+
 	grain_pool_t* render_next;
+	bool queued_for_render;
 
 	int num_draws;
 };
@@ -92,6 +101,10 @@ grain_cleanup_archetype(grain_archetype_t* archetype) {
 		grain_dsl_free_bytecode(archetype->shaders.render_vert_bytecode);
 		grain_dsl_free_bytecode(archetype->shaders.render_frag_bytecode);
 	}
+	afree(archetype->emitters);
+	afree(archetype->affectors);
+	afree(archetype->params);
+	afree(archetype->params_offsets);
 	cf_destroy_shader(archetype->shaders.update_shader);
 	cf_destroy_shader(archetype->shaders.render_shader);
 }
@@ -399,7 +412,7 @@ grain_create(void) {
 
 	*grain = (grain_t){
 		.arena = cf_make_arena(16, 4096),
-		.dummy_mesh = cf_make_mesh(0, &(CF_VertexAttribute){}, 0, 0),
+		.dummy_mesh = cf_make_mesh(4, &(CF_VertexAttribute){}, 0, 0),
 	};
 
 	return grain;
@@ -846,6 +859,78 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		.render_size = render_size,
 	};
 
+	// Calculate param offsets
+	offset = 0;
+	for (int i = 0; i < spec.num_emitters; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.emitters[i];
+		grain_module_info_t module_info = {
+			.name = module->info->name,
+			.first_params = asize(archetype->params),
+			.num_params = asize(module->info->module_params),
+		};
+		apush(archetype->emitters, module_info);
+		for (int j = 0; j < asize(module->info->module_params); ++j) {
+			grain_dsl_var_t var = module->info->module_params[j];
+
+			int alignment = grain_type_alignment(var.type);
+			offset = ((offset + alignment - 1) / alignment) * alignment;
+
+			grain_param_info_t param_info = {
+				.name = var.name,
+				.type = (CF_ShaderInfoDataType)var.type,
+			};
+			apush(archetype->params, param_info);
+			apush(archetype->params_offsets, offset);
+
+			offset += grain_type_size(var.type);
+		}
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		grain_module_t* module = (grain_module_t*)spec.affectors[i];
+		grain_module_info_t module_info = {
+			.name = module->info->name,
+			.first_params = asize(archetype->params),
+			.num_params = asize(module->info->module_params),
+		};
+		apush(archetype->affectors, module_info);
+		for (int j = 0; j < asize(module->info->module_params); ++j) {
+			grain_dsl_var_t var = module->info->module_params[j];
+
+			int alignment = grain_type_alignment(var.type);
+			offset = ((offset + alignment - 1) / alignment) * alignment;
+
+			grain_param_info_t param_info = {
+				.name = var.name,
+				.type = (CF_ShaderInfoDataType)var.type,
+			};
+			apush(archetype->params, param_info);
+			apush(archetype->params_offsets, offset);
+
+			offset += grain_type_size(var.type);
+		}
+	}
+
+	offset = 0;
+	archetype->renderer = (grain_module_info_t){
+		.name = render_module->info->name,
+		.first_params = asize(archetype->params),
+		.num_params = asize(render_module->info->module_params),
+	};
+	for (int j = 0; j < asize(render_module->info->module_params); ++j) {
+		grain_dsl_var_t var = render_module->info->module_params[j];
+
+		int alignment = grain_type_alignment(var.type);
+		offset = ((offset + alignment - 1) / alignment) * alignment;
+
+		grain_param_info_t param_info = {
+			.name = var.name,
+			.type = (CF_ShaderInfoDataType)var.type,
+		};
+		apush(archetype->params, param_info);
+		apush(archetype->params_offsets, offset);
+
+		offset += grain_type_size(var.type);
+	}
 fail:
 	sfree(archetype_common);
 	sfree(archetype_update);
@@ -896,7 +981,7 @@ static void
 grain_init_ssbo(grain_ssbo_t* ssbo, int size) {
 	ssbo->gpu = cf_make_storage_buffer(cf_storage_buffer_defaults(size));
 	ssbo->cpu = cf_alloc(size);
-	ssbo->dirty_size_hwm = 0;
+	ssbo->dirty = false;
 }
 
 static void
@@ -906,15 +991,17 @@ grain_cleanup_ssbo(grain_ssbo_t* ssbo) {
 }
 
 static void
-grain_sync_ssbo(grain_ssbo_t* ssbo) {
-	cf_update_storage_buffer(ssbo->gpu, ssbo->cpu, ssbo->dirty_size_hwm);
-	ssbo->dirty_size_hwm = 0;
+grain_sync_ssbo(grain_ssbo_t* ssbo, int size) {
+	if (!ssbo->dirty) { return; }
+
+	cf_update_storage_buffer(ssbo->gpu, ssbo->cpu, size);
+	ssbo->dirty = false;
 }
 
 static void*
 grain_index_ssbo(grain_ssbo_t* ssbo, int item_size, int index) {
 	char* cpu_mem = (char*)ssbo->cpu + item_size * index;
-	ssbo->dirty_size_hwm = cf_max((index + 1) * item_size, ssbo->dirty_size_hwm);
+	ssbo->dirty = true;
 	return cpu_mem;
 }
 
@@ -1000,10 +1087,11 @@ grain_destroy_system(grain_system_t* system) {
 static void
 grain_touch(grain_pool_t* pool) {
 	// Link pool to update list
-	if (pool->update_next == NULL) {
+	if (!pool->queued_for_update) {
 		grain_t* grain = pool->grain;
 		pool->update_next = grain->update_list;
 		grain->update_list = pool;
+		pool->queued_for_update = true;
 	}
 }
 
@@ -1020,6 +1108,7 @@ grain_tick(grain_system_t* system, float dt_s) {
 	grain_advance_clock(&pool->clocks[index], dt_s);
 
 	grain_clock_entry_t* clock_entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), index);
+	clock_entry->rate = pool->clocks[index].rate;
 	clock_entry->dt = dt_s;
 	clock_entry->elapsed = pool->clocks[index].elapsed;
 	clock_entry->gen_base = pool->clocks[index].gen_base;
@@ -1037,21 +1126,33 @@ grain_set_emission_rate(grain_system_t* system, float particles_per_second) {
 	grain_set_clock_rate(&pool->clocks[index], pool->opts.max_particles_per_system, particles_per_second);
 
 	grain_clock_entry_t* clock_entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), index);
+	clock_entry->rate = pool->clocks[index].rate;
 	clock_entry->elapsed = pool->clocks[index].elapsed;
 	clock_entry->gen_base = pool->clocks[index].gen_base;
 
 	grain_touch(system->pool);
 }
 
+static int
+grain_find_system_hwm(grain_pool_t* pool) {
+	for (int i = pool->opts.max_systems - 1; i >= 0; --i) {
+		if (pool->systems[i].used) {
+			return i;
+		}
+	}
+	return 0;
+}
+
 static void
 grain_update_pool(grain_t* grain, grain_pool_t* pool) {
-	grain_sync_ssbo(&pool->update_ssbo);
-	grain_sync_ssbo(&pool->clock_ssbo);
+	int system_hwm = grain_find_system_hwm(pool);
+	grain_sync_ssbo(&pool->update_ssbo, (system_hwm + 1) * pool->opts.archetype->update_size);
+	grain_sync_ssbo(&pool->clock_ssbo, (system_hwm + 1) * sizeof(grain_clock_entry_t));
 
 	CF_Canvas src_canvas = pool->canvases[pool->pingpong ? 0 : 1];
 	CF_Canvas dst_canvas = pool->canvases[pool->pingpong ? 1 : 0];
 
-	cf_apply_canvas(dst_canvas, false);
+	cf_apply_canvas(dst_canvas, true);
 	cf_apply_mesh(grain->dummy_mesh);
 	for (int i = 0; i < pool->opts.archetype->num_textures; ++i) {
 		char name[256];
@@ -1072,6 +1173,26 @@ grain_update_pool(grain_t* grain, grain_pool_t* pool) {
 	pool->pingpong = !pool->pingpong;
 }
 
+static bool
+grain_find_param(
+	grain_archetype_t* archetype,
+	grain_module_info_t* module,
+	const char* name,
+	int* offset, int* size
+) {
+	const char* interned_name = sintern(name);
+	for (int i = 0; i < module->num_params; ++i) {
+		grain_param_info_t param_info = archetype->params[module->first_params + i];
+		if (param_info.name == interned_name) {
+			*offset = archetype->params_offsets[module->first_params + i];
+			*size = grain_type_size((CSPV_DataType)param_info.type);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void
 grain_set_emitter_parameter(
 	grain_system_t* system,
@@ -1079,6 +1200,24 @@ grain_set_emitter_parameter(
 	const char* name,
 	const void* value
 ) {
+	grain_pool_t* pool = system->pool;
+	int index = system - pool->systems;
+	grain_archetype_t* archetype = pool->opts.archetype;
+	if (emitter_index >= asize(archetype->emitters)) { return; }
+
+	int param_offset;
+	int	param_size;
+	if (!grain_find_param(
+		archetype,
+		&archetype->emitters[emitter_index],
+		name,
+		&param_offset, &param_size
+	)) {
+		return;
+	}
+
+	char* update_params = grain_index_ssbo(&pool->update_ssbo, archetype->update_size, index);
+	memcpy(update_params + param_offset, value, param_size);
 }
 
 void
@@ -1088,6 +1227,24 @@ grain_set_affector_parameter(
 	const char* name,
 	const void* value
 ) {
+	grain_pool_t* pool = system->pool;
+	int index = system - pool->systems;
+	grain_archetype_t* archetype = pool->opts.archetype;
+	if (affector_index >= asize(archetype->affectors)) { return; }
+
+	int param_offset;
+	int	param_size;
+	if (!grain_find_param(
+		archetype,
+		&archetype->affectors[affector_index],
+		name,
+		&param_offset, &param_size
+	)) {
+		return;
+	}
+
+	char* update_params = grain_index_ssbo(&pool->update_ssbo, archetype->update_size, index);
+	memcpy(update_params + param_offset, value, param_size);
 }
 
 void
@@ -1096,6 +1253,23 @@ grain_set_renderer_parameter(
 	const char* name,
 	const void* value
 ) {
+	grain_pool_t* pool = system->pool;
+	int index = system - pool->systems;
+	grain_archetype_t* archetype = pool->opts.archetype;
+
+	int param_offset;
+	int	param_size;
+	if (!grain_find_param(
+		archetype,
+		&archetype->renderer,
+		name,
+		&param_offset, &param_size
+	)) {
+		return;
+	}
+
+	char* render_params = grain_index_ssbo(&pool->render_ssbo, archetype->render_size, index);
+	memcpy(render_params + param_offset, value, param_size);
 }
 
 void
@@ -1104,11 +1278,11 @@ grain_end_update(grain_t* grain) {
 		grain_pool_t* itr = grain->update_list;
 		itr != NULL;
 	) {
-		grain_pool_t* next = itr->update_next;
-		itr->update_next = NULL;
-
 		grain_update_pool(grain, itr);
 
+		grain_pool_t* next = itr->update_next;
+		itr->update_next = NULL;
+		itr->queued_for_update = false;
 		itr = next;
 	}
 
@@ -1129,16 +1303,18 @@ grain_render(grain_system_t* system) {
 	uint32_t* draw_list_item = grain_index_ssbo(&pool->draw_list, sizeof(uint32_t), pool->num_draws++);
 	*draw_list_item = index;
 
-	if (pool->render_next == NULL) {
+	if (!pool->queued_for_render) {
 		pool->render_next = grain->render_list;
 		grain->render_list = pool;
+		pool->queued_for_render = true;
 	}
 }
 
 static void
 grain_render_pool(grain_t* grain, grain_pool_t* pool) {
-	grain_sync_ssbo(&pool->draw_list);
-	grain_sync_ssbo(&pool->render_ssbo);
+	int system_hwm = grain_find_system_hwm(pool);
+	grain_sync_ssbo(&pool->render_ssbo, pool->opts.archetype->render_size * (system_hwm + 1));
+	grain_sync_ssbo(&pool->draw_list, sizeof(uint32_t) * pool->num_draws);
 
 	cf_apply_mesh(grain->dummy_mesh);
 	CF_Canvas src_canvas = pool->canvases[pool->pingpong ? 0 : 1];
@@ -1153,6 +1329,7 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool) {
 	CF_StorageBuffer storage_buffers[] = {
 		pool->render_ssbo.gpu,
 		pool->clock_ssbo.gpu,
+		pool->draw_list.gpu,
 	};
 	cf_apply_vs_storage_buffers(storage_buffers, CF_ARRAY_SIZE(storage_buffers));
 	cf_apply_fs_storage_buffers(storage_buffers, CF_ARRAY_SIZE(storage_buffers));
@@ -1167,11 +1344,11 @@ grain_end_render(grain_t* grain) {
 		grain_pool_t* itr = grain->render_list;
 		itr != NULL;
 	) {
-		grain_pool_t* next = itr->render_next;
-		itr->render_next = NULL;
-
 		grain_render_pool(grain, itr);
 
+		grain_pool_t* next = itr->render_next;
+		itr->render_next = NULL;
+		itr->queued_for_render = false;
 		itr = next;
 	}
 

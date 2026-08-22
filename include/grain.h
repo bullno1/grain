@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <cute_graphics.h>
-#include <cute/ckit.h>
 
 typedef struct grain_s grain_t;
 typedef struct grain_emitter_s grain_emitter_t;
@@ -33,7 +32,7 @@ typedef struct {
 typedef struct {
 	const char* name;
 	CF_ShaderInfoDataType type;
-} grain_parameter_info_t;
+} grain_param_info_t;
 
 typedef struct {
 	const char* name;
@@ -42,11 +41,14 @@ typedef struct {
 } grain_module_info_t;
 
 typedef struct {
-	CK_DYNA grain_module_info_t* emitters;
-	CK_DYNA grain_module_info_t* affectors;
-	        grain_module_info_t  renderer;
+	const grain_module_info_t* emitters;
+	int num_emitters;
 
-	CK_DYNA grain_parameter_info_t* params;
+	const grain_module_info_t* affectors;
+	int num_affectors;
+
+	const grain_module_info_t  renderer;
+	const grain_param_info_t* params;
 } grain_archetype_info_t;
 
 grain_t*
