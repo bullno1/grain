@@ -39,7 +39,7 @@ grain_dsl_compile_archetype(
 );
 
 void
-grain_free_bytecode(CF_ShaderBytecode bytecode);
+grain_dsl_free_bytecode(CF_ShaderBytecode bytecode);
 
 static inline void
 grain_dsl_free_module_info(grain_dsl_module_info_t* module_info) {

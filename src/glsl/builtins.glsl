@@ -81,6 +81,44 @@ SystemClock grain_unpack_SystemClock(uvec4 v) {
 	return clock;
 }
 
+// Read from RGBA32F
+void
+grain_convert(out int dst, float src) {
+	dst = floatBitsToInt(src);
+}
+
+void
+grain_convert(out uint dst, float src) {
+	dst = floatBitsToUint(src);
+}
+
+void
+grain_convert(out float dst, float src) {
+	dst = src;
+}
+
+// Write to RGBA32F
+void
+grain_convert(out float dst, int src) {
+	dst = intBitsToFloat(src);
+}
+
+void
+grain_convert(out float dst, uint src) {
+	dst = uintBitsToFloat(src);
+}
+
+// Read from RGBA32UI
+void
+grain_convert(out int dst, uint src) {
+	dst = int(src);
+}
+
+void
+grain_convert(out uint dst, uint src) {
+	dst = src;
+}
+
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
 
 vec2 quad() {

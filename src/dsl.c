@@ -281,7 +281,7 @@ grain_dsl_compile_for_cf(
 }
 
 void
-grain_free_bytecode(CF_ShaderBytecode bytecode) {
+grain_dsl_free_bytecode(CF_ShaderBytecode bytecode) {
 	// Reflection names are interned strings (immortal) -- only the arrays are freed.
 	CF_ShaderInfo* shader_info = &bytecode.shader_info;
 	cf_free(shader_info->inputs);
@@ -485,9 +485,9 @@ grain_dsl_compile_archetype(
 	return true;
 
 fail:
-	grain_free_bytecode(update_fs_bytecode);
-	grain_free_bytecode(render_vs_bytecode);
-	grain_free_bytecode(render_fs_bytecode);
+	grain_dsl_free_bytecode(update_fs_bytecode);
+	grain_dsl_free_bytecode(render_vs_bytecode);
+	grain_dsl_free_bytecode(render_fs_bytecode);
 	return false;
 }
 
