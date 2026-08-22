@@ -786,12 +786,13 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend    (archetype_render, "}\n");
 	sappend    (archetype_render, "#endif\n");
 
-	grain_dsl_archetype_t* dsl_archetype = grain_dsl_compile_archetype(
+	grain_dsl_archetype_t dsl_archetype = { 0 };
+	if (!grain_dsl_compile_archetype(
 		grain,
 		spec,
-		archetype_common, archetype_update, archetype_render
-	);
-	if (dsl_archetype == NULL) {
+		archetype_common, archetype_update, archetype_render,
+		&dsl_archetype
+	)) {
 		goto fail;
 	}
 

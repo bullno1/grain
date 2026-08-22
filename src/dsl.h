@@ -28,14 +28,18 @@ typedef struct {
 grain_dsl_module_info_t*
 grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage);
 
-grain_dsl_archetype_t*
+bool
 grain_dsl_compile_archetype(
 	grain_t* grain,
 	grain_archetype_spec_t spec,
 	const char* common_source,
 	const char* update_source,
-	const char* render_source
+	const char* render_source,
+	grain_dsl_archetype_t* out
 );
+
+void
+grain_free_bytecode(CF_ShaderBytecode bytecode);
 
 static inline void
 grain_dsl_free_module_info(grain_dsl_module_info_t* module_info) {

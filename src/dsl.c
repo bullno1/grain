@@ -1,6 +1,7 @@
 #include "dsl.h"
 #include "internal.h"
 #include "resources.rc"
+#include "gen/update_vert_bytecode.h"
 
 typedef struct {
 	const char* name;
@@ -279,7 +280,7 @@ grain_dsl_compile_for_cf(
 	return true;
 }
 
-static void
+void
 grain_free_bytecode(CF_ShaderBytecode bytecode) {
 	// Reflection names are interned strings (immortal) -- only the arrays are freed.
 	CF_ShaderInfo* shader_info = &bytecode.shader_info;
@@ -392,13 +393,14 @@ fail:
 	return NULL;
 }
 
-grain_dsl_archetype_t*
+bool
 grain_dsl_compile_archetype(
 	grain_t* grain,
 	grain_archetype_spec_t spec,
 	const char* common_source,
 	const char* update_source,
-	const char* render_source
+	const char* render_source,
+	grain_dsl_archetype_t* out
 ) {
 	int num_vfs_entries = spec.num_emitters + spec.num_affectors + 6;
 	int vfs_index = 0;
@@ -475,11 +477,18 @@ grain_dsl_compile_archetype(
 		goto fail;
 	}
 
+	out->update_frag_bytecode = update_fs_bytecode;
+	out->render_vert_bytecode = render_vs_bytecode;
+	out->render_frag_bytecode = render_fs_bytecode;
+	out->render_shader = cf_make_shader_from_bytecode(render_vs_bytecode, render_fs_bytecode);
+	out->update_shader = cf_make_shader_from_bytecode(grain_update_vert_bytecode, update_fs_bytecode);
+	return true;
+
 fail:
 	grain_free_bytecode(update_fs_bytecode);
 	grain_free_bytecode(render_vs_bytecode);
 	grain_free_bytecode(render_fs_bytecode);
-	return NULL;
+	return false;
 }
 
 #define CUTE_SPIRV_IMPLEMENTATION

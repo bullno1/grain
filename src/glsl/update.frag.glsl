@@ -2,7 +2,7 @@
 #include "archetype/update.glsl"
 
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
-	uint grain__pool_size;
+	int grain__pool_size;  // CF does not support uint uniform
 };
 
 void main() {
@@ -10,14 +10,14 @@ void main() {
 	ivec2 size  = textureSize(grain__texture_0, 0);
 
 	uint flat   = uint(texel.y * size.x + texel.x);
-	uint region = flat / grain__pool_size;
-	uint lid    = flat % grain__pool_size;
+	uint region = flat / uint(grain__pool_size;
+	uint lid    = flat % uint(grain__pool_size);
 
 	ParticleAttrs particle = grain__load_ParticleAttrs(texel);
 	SystemParams params = grain__load_SystemParams(region);
 	SystemClock clock = grain__load_SystemClock(region);
-
-	Schedule sch = schedule(lid, grain__pool_size, clock);
+*)
+	Schedule sch = schedule(lid, uint(grain__pool_size), clock);
 	uint gen = sch.gen + clock.gen_base;
 
 	srand(flat, gen);
