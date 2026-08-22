@@ -3,7 +3,6 @@
 
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	int grain_pool_size;  // CF does not support uint uniform
-	float grain_lifetime_budget;
 };
 
 void main() {
@@ -15,18 +14,26 @@ void main() {
 	uint lid    = gid % uint(grain_pool_size);
 
 	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
+	float birth = grain_load_birth(texel);
 	SystemParams params = grain_load_SystemParams(region);
 	SystemClock clock = grain_load_SystemClock(region);
 
-	Schedule sch = schedule(lid, grain_lifetime_budget, clock);
-	uint gen = sch.gen + clock.gen_base;
+	// The CPU folded `elapsed` down to keep it precise; bring this particle's birth
+	// into the same epoch. Only the update pass does this, and it stores the result,
+	// so the shift is applied exactly once.
+	if (birth >= 0.0) { birth -= clock.wrap_shift; }
 
-	srand(gid, gen);
+	Schedule sch = schedule(lid, uint(grain_pool_size), birth, clock);
+	birth = sch.birth;
+
+	// The seed is the birth time: unique per particle, fixed for its whole life, and
+	// the render stages recover the identical value from the texture.
+	srand(gid, floatBitsToUint(birth));
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;
 	ctx.dt = sch.emit ? sch.age : clock.dt;
-	ctx.time = clock.elapsed - (sch.emit ? (clock.dt - sch.age) : 0.0);
+	ctx.time = sch.emit ? sch.birth : clock.elapsed;
 
 	if (sch.emit) {
 		grain_emit(particle, params, ctx);
@@ -36,5 +43,5 @@ void main() {
 		grain_process(particle, params, ctx);
 	}
 
-	grain_store_ParticleAttrs(particle);
+	grain_store(particle, birth);
 }

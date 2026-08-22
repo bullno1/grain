@@ -21,14 +21,11 @@ struct grain_archetype_s {
 	int num_textures;
 	int update_size;
 	int render_size;
-};
 
-typedef struct {
-	float rate;
-	float elapsed;
-	float dt;
-	uint32_t gen_base;
-} grain_clock_entry_t;
+	// Texture/channel of the hidden birth-time lane (see grain_define_archetype).
+	int birth_texture;
+	int birth_channel;
+};
 
 struct grain_system_s {
 	grain_pool_t* pool;
@@ -412,7 +409,7 @@ grain_create(void) {
 	grain_t* grain = cf_alloc(sizeof(grain_t));
 
 	*grain = (grain_t){
-		.arena = cf_make_arena(16, 4096),
+		.arena = cf_make_arena(16, 64 * 1024),
 		.dummy_mesh = cf_make_mesh(4, &(CF_VertexAttribute){}, 0, 0),
 	};
 
@@ -516,7 +513,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	for (int i = 0; i < map_size(particle_attrs); ++i) {
 		attr_total_size += grain_type_size(particle_attrs[i].var_info.type);
 	}
-	int num_textures = (attr_total_size + GRAIN_TEXTURE_CAPACITY - 1) / GRAIN_TEXTURE_CAPACITY;
+	// One hidden lane after the user attributes carries the particle's birth time.
+	int birth_lane = attr_total_size / (int)sizeof(float);
+	int num_textures = (attr_total_size + (int)sizeof(float) + GRAIN_TEXTURE_CAPACITY - 1) / GRAIN_TEXTURE_CAPACITY;
 	if (num_textures > CF_MAX_CANVAS_TARGETS) {
 		grain_set_last_error(grain, "Archetype requires too many storage tetures");
 		goto fail;
@@ -533,7 +532,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	}
 
 	sappend(archetype_common, "\n");
-	sfmt_append(archetype_common, "void grain_pack_ParticleAttrs(out vec4[%d] grain_packed, ParticleAttrs unpacked) {\n", num_textures);
+	sfmt_append(archetype_common, "void grain_pack_ParticleAttrs(inout vec4[%d] grain_packed, ParticleAttrs unpacked) {\n", num_textures);
 	int pack_lane_idx = 0;
 	for (int i = 0; i < map_size(particle_attrs); ++i) {
 		grain_pack_attr(&archetype_common, &pack_lane_idx, particle_attrs[i].var_info);
@@ -557,6 +556,11 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		sfmt_append(archetype_common, "\tgrain_packed[%d] = texelFetch(grain_texture_%d, texel, 0);\n", i, i);
 	}
 	sappend    (archetype_common, "\treturn grain_unpack_ParticleAttrs(grain_packed);\n");
+	sappend    (archetype_common, "}\n");
+
+	sappend    (archetype_common, "\n");
+	sappend    (archetype_common, "float grain_load_birth(ivec2 texel) {\n");
+	sfmt_append(archetype_common, "\treturn texelFetch(grain_texture_%d, texel, 0).%c;\n", birth_lane / 4, "xyzw"[birth_lane % 4]);
 	sappend    (archetype_common, "}\n");
 
 	// Update shader
@@ -684,7 +688,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(archetype_update, "}\n");
 
 	sappend    (archetype_update, "SystemClock grain_load_SystemClock(uint i) {\n");
-	sappend    (archetype_update, "\treturn grain_unpack_SystemClock(grain_system_clocks[i]);\n");
+	sappend    (archetype_update, "\treturn grain_unpack_SystemClock(grain_system_clocks[i * 2u], grain_system_clocks[i * 2u + 1u]);\n");
 	sappend    (archetype_update, "}\n");
 	sappend    (archetype_update, "#else\n");
 	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_params { SystemParams grain_system_params[]; };\n", num_textures + 0);
@@ -703,9 +707,13 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	}
 
 	sappend(archetype_update, "\n");
-	sappend    (archetype_update, "void grain_store_ParticleAttrs(ParticleAttrs particle) {\n");
+	sappend    (archetype_update, "void grain_store(ParticleAttrs particle, float birth) {\n");
 	sfmt_append(archetype_update, "\tvec4[%d] grain_packed;\n", num_textures);
+	for (int i = 0; i < num_textures; ++i) {
+		sfmt_append(archetype_update, "\tgrain_packed[%d] = vec4(0.0);\n", i);
+	}
 	sappend    (archetype_update, "\tgrain_pack_ParticleAttrs(grain_packed, particle);\n");
+	sfmt_append(archetype_update, "\tgrain_packed[%d].%c = birth;\n", birth_lane / 4, "xyzw"[birth_lane % 4]);
 	for (int i = 0; i < num_textures; ++i) {
 		sfmt_append(archetype_update, "\tgrain_output_%d = grain_packed[%d];\n", i, i);
 	}
@@ -807,7 +815,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(archetype_render, "}\n");
 
 	sappend    (archetype_render, "SystemClock grain_load_SystemClock(uint i) {\n");
-	sappend    (archetype_render, "\treturn grain_unpack_SystemClock(grain_system_clocks[i]);\n");
+	sappend    (archetype_render, "\treturn grain_unpack_SystemClock(grain_system_clocks[i * 2u], grain_system_clocks[i * 2u + 1u]);\n");
 	sappend    (archetype_render, "}\n");
 	sappend    (archetype_render, "uint grain_load_draw_region(uint i) {\n");
 	sappend    (archetype_render, "\treturn grain_draw_list[i / 4][i % 4];\n");
@@ -858,6 +866,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		.num_textures = num_textures,
 		.update_size = update_size,
 		.render_size = render_size,
+		.birth_texture = birth_lane / 4,
+		.birth_channel = birth_lane % 4,
 	};
 
 	// Calculate param offsets
@@ -1047,11 +1057,17 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 	pool->canvases[0] = cf_make_canvas(canvas_params);
 	pool->canvases[1] = cf_make_canvas(canvas_params);
 
+	// A negative birth time marks a slot as never born. Everything else clears to zero
+	// so stale VRAM can never masquerade as a particle.
+	CF_Color never_born = { 0 };
+	((float*)&never_born)[opts.archetype->birth_channel] = -1.f;
+	for (int i = 0; i < 2; ++i) {
+		cf_canvas_set_clear_color2(pool->canvases[i], opts.archetype->birth_texture, never_born);
+	}
+
 	pool->material = cf_make_material();
 	cf_material_set_uniform_vs(pool->material, "grain_pool_size", &pool_size, CF_UNIFORM_TYPE_INT, 1);
 	cf_material_set_uniform_fs(pool->material, "grain_pool_size", &pool_size, CF_UNIFORM_TYPE_INT, 1);
-	cf_material_set_uniform_vs(pool->material, "grain_lifetime_budget", &opts.lifetime_budget, CF_UNIFORM_TYPE_FLOAT, 1);
-	cf_material_set_uniform_fs(pool->material, "grain_lifetime_budget", &opts.lifetime_budget, CF_UNIFORM_TYPE_FLOAT, 1);
 	// TODO: allow override
 	CF_RenderState render_state = cf_render_state_defaults();
 	render_state.primitive_type = CF_PRIMITIVE_TYPE_TRIANGLESTRIP;
@@ -1088,7 +1104,7 @@ grain_create_system(grain_pool_t* pool) {
 		if (!pool->systems[i].used) {
 			grain_system_t* system = &pool->systems[i];
 			system->used = true;
-			grain_init_clock(&pool->clocks[i], pool->opts.lifetime_budget, 1.0);
+			grain_init_clock(&pool->clocks[i], pool->opts.lifetime_budget, 0.0);
 			return system;
 		}
 	}
@@ -1124,15 +1140,7 @@ grain_tick(grain_system_t* system, float dt_s) {
 	grain_pool_t* pool = system->pool;
 	int index = system - pool->systems;
 
-	// Upload the dt the clock actually applied, never the requested one.
-	double dt = grain_advance_clock(&pool->clocks[index], dt_s);
-
-	grain_clock_entry_t* clock_entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), index);
-	clock_entry->rate = pool->clocks[index].rate;
-	clock_entry->dt = (float)dt;
-	clock_entry->elapsed = pool->clocks[index].elapsed;
-	clock_entry->gen_base = pool->clocks[index].gen_base;
-
+	grain_advance_clock(&pool->clocks[index], dt_s);
 	grain_touch(system->pool);
 }
 
@@ -1145,20 +1153,9 @@ grain_set_emission_rate(grain_system_t* system, float particles_per_second) {
 	if (particles_per_second > pool->opts.max_emission_rate) {
 		particles_per_second = pool->opts.max_emission_rate;
 	}
-	// A rate of 0 would make `first` a NaN for slot 0 on the GPU. Floor it instead, which
-	// pushes every other slot past the ring and leaves one particle per period.
-	if (particles_per_second < 1e-6f) { particles_per_second = 1e-6f; }
+	if (particles_per_second < 0.f) { particles_per_second = 0.f; }
 
-	if (pool->clocks[index].rate == particles_per_second) { return; }
-
-	grain_set_clock_rate(&pool->clocks[index], pool->opts.lifetime_budget, particles_per_second);
-
-	grain_clock_entry_t* clock_entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), index);
-	clock_entry->rate = pool->clocks[index].rate;
-	clock_entry->elapsed = pool->clocks[index].elapsed;
-	clock_entry->gen_base = pool->clocks[index].gen_base;
-
-	grain_touch(system->pool);
+	grain_set_clock_rate(&pool->clocks[index], particles_per_second);
 }
 
 static int
@@ -1175,6 +1172,17 @@ static void
 grain_update_pool(grain_t* grain, grain_pool_t* pool) {
 	int system_hwm = grain_find_system_hwm(pool);
 	grain_sync_ssbo(&pool->update_ssbo, (system_hwm + 1) * pool->opts.archetype->update_size);
+
+	// Each system's window is everything since its last snapshot. A system that did
+	// not tick gets dt = 0 and an empty window, so this pass leaves it exactly as is.
+	for (int i = 0; i <= system_hwm; ++i) {
+		grain_clock_entry_t* entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), i);
+		if (pool->systems[i].used) {
+			*entry = grain_snapshot_clock(&pool->clocks[i], pool->pool_size);
+		} else {
+			*entry = (grain_clock_entry_t){ 0 };
+		}
+	}
 	grain_sync_ssbo(&pool->clock_ssbo, (system_hwm + 1) * sizeof(grain_clock_entry_t));
 
 	CF_Canvas src_canvas = pool->canvases[pool->pingpong ? 0 : 1];

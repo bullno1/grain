@@ -3,7 +3,6 @@
 
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	int grain_pool_size;
-	float grain_lifetime_budget;
 };
 
 layout(location = 0) flat in uint v_region;
@@ -17,18 +16,18 @@ void main() {
 	ivec2 texel = ivec2(int(gid) % size.x, int(gid) / size.x);
 
 	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
+	float birth = grain_load_birth(texel);
 	ModuleParams params = grain_load_ModuleParams(v_region);
 	SystemClock clock = grain_load_SystemClock(v_region);
 
-	Schedule sch = schedule(v_lid, grain_lifetime_budget, clock);
-	uint gen = sch.gen + clock.gen_base;
+	Schedule sch = grain_observe(birth, clock);
 
-	srand(gid, gen);
+	srand(gid, floatBitsToUint(birth));
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;
 	ctx.dt = sch.emit ? sch.age : clock.dt;
-	ctx.time = clock.elapsed - (sch.emit ? (clock.dt - sch.age) : 0.0);
+	ctx.time = sch.emit ? sch.birth : clock.elapsed;
 
 	process(particle, params, ctx);
 	result = grain_Color;

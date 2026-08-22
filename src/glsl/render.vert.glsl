@@ -3,7 +3,6 @@
 // Declared before the archetype include so the renderer module can use grain_transform.
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	int grain_pool_size;  // CF does not support uint uniform
-	float grain_lifetime_budget;
 	mat4 grain_transform; // The caller's 2D transform stack, world -> clip.
 };
 
@@ -24,18 +23,18 @@ void main() {
 	ivec2 texel = ivec2(int(gid) % size.x, int(gid) / size.x);
 
 	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
+	float birth = grain_load_birth(texel);
 	ModuleParams params = grain_load_ModuleParams(region);
 	SystemClock clock = grain_load_SystemClock(region);
 
-	Schedule sch = schedule(lid, grain_lifetime_budget, clock);
-	uint gen = sch.gen + clock.gen_base;
+	Schedule sch = grain_observe(birth, clock);
 
-	srand(gid, gen);
+	srand(gid, floatBitsToUint(birth));
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;
 	ctx.dt = sch.emit ? sch.age : clock.dt;
-	ctx.time = clock.elapsed - (sch.emit ? (clock.dt - sch.age) : 0.0);
+	ctx.time = sch.emit ? sch.birth : clock.elapsed;
 
 	v_region = region;
 	v_lid = lid;
