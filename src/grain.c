@@ -847,7 +847,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	}
 
 	const char* interned_name = sintern(name);
-	archetype = map_get(grain->archetypes, name);
+	archetype = map_get(grain->archetypes, interned_name);
 	if (archetype == NULL) {
 		archetype = cf_alloc(sizeof(grain_archetype_t));
 		map_set(grain->archetypes, interned_name, archetype);
