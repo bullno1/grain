@@ -522,6 +522,19 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		goto fail;
 	}
 
+	// Inject birth attribute
+	int birth_lane = 0;
+	for (int i = 0; i < map_size(particle_attrs); ++i) {
+		birth_lane += grain_type_size(particle_attrs[i].var_info.type) / (int)sizeof(float);
+	}
+	const char* birth_attr_name = sintern("grain_birth");
+	grain_attr_info_t birth_attr = {
+		.var_info = { .name = birth_attr_name, .type = CSPV_TYPE_FLOAT },
+		.first_decl_module_name = "grain",
+		.first_decl_module_type = "internal",
+	};
+	map_set(particle_attrs, birth_attr_name, birth_attr);
+
 	// Attribute type
 	sappend(archetype_common, "struct ParticleAttrs {\n");
 	for (int i = 0; i < map_size(particle_attrs); ++i) {
@@ -547,9 +560,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	for (int i = 0; i < map_size(particle_attrs); ++i) {
 		attr_total_size += grain_type_size(particle_attrs[i].var_info.type);
 	}
-	// One hidden lane after the user attributes carries the particle's birth time.
-	int birth_lane = attr_total_size / (int)sizeof(float);
-	int num_textures = (attr_total_size + (int)sizeof(float) + GRAIN_TEXTURE_CAPACITY - 1) / GRAIN_TEXTURE_CAPACITY;
+	int num_textures = (attr_total_size + GRAIN_TEXTURE_CAPACITY - 1) / GRAIN_TEXTURE_CAPACITY;
 	if (num_textures > CF_MAX_CANVAS_TARGETS) {
 		grain_set_last_error(grain, "Archetype requires too many storage tetures");
 		goto fail;
@@ -590,11 +601,6 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		sfmt_append(archetype_common, "\tgrain_packed[%d] = texelFetch(grain_texture_%d, texel, 0);\n", i, i);
 	}
 	sappend    (archetype_common, "\treturn grain_unpack_ParticleAttrs(grain_packed);\n");
-	sappend    (archetype_common, "}\n");
-
-	sappend    (archetype_common, "\n");
-	sappend    (archetype_common, "float grain_load_birth(ivec2 texel) {\n");
-	sfmt_append(archetype_common, "\treturn texelFetch(grain_texture_%d, texel, 0).%c;\n", birth_lane / 4, "xyzw"[birth_lane % 4]);
 	sappend    (archetype_common, "}\n");
 
 	// Update shader
@@ -741,10 +747,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	}
 
 	sappend(archetype_update, "\n");
-	sappend    (archetype_update, "void grain_store(ParticleAttrs particle, float birth) {\n");
+	sappend    (archetype_update, "void grain_store(ParticleAttrs particle) {\n");
 	sfmt_append(archetype_update, "\tvec4[%d] grain_packed;\n", num_textures);
 	sappend    (archetype_update, "\tgrain_pack_ParticleAttrs(grain_packed, particle);\n");
-	sfmt_append(archetype_update, "\tgrain_packed[%d].%c = birth;\n", birth_lane / 4, "xyzw"[birth_lane % 4]);
 	for (int i = 0; i < num_textures; ++i) {
 		sfmt_append(archetype_update, "\tgrain_output_%d = grain_packed[%d];\n", i, i);
 	}

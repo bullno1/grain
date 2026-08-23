@@ -14,21 +14,19 @@ void main() {
 	uint lid    = gid % uint(grain_pool_size);
 
 	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
-	float birth = grain_load_birth(texel);
 	SystemParams params = grain_load_SystemParams(region);
 	SystemClock clock = grain_load_SystemClock(region);
 
 	// The CPU folded `elapsed` down to keep it precise; bring this particle's birth
 	// into the same epoch. Only the update pass does this, and it stores the result,
 	// so the shift is applied exactly once.
-	if (birth >= 0.0) { birth -= clock.wrap_shift; }
+	if (particle.grain_birth >= 0.0) { particle.grain_birth -= clock.wrap_shift; }
 
-	Schedule sch = schedule(lid, uint(grain_pool_size), birth, clock);
-	birth = sch.birth;
+	Schedule sch = schedule(lid, uint(grain_pool_size), particle.grain_birth, clock);
 
 	// The seed is the birth time: unique per particle, fixed for its whole life, and
 	// the render stages recover the identical value from the texture.
-	srand(gid, floatBitsToUint(birth));
+	srand(gid, floatBitsToUint(sch.birth));
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;
@@ -43,5 +41,7 @@ void main() {
 		grain_process(particle, params, ctx);
 	}
 
-	grain_store(particle, birth);
+	// Reassign to prevent wholesale assign from modules
+	particle.grain_birth = sch.birth;
+	grain_store(particle);
 }

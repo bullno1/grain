@@ -1,5 +1,6 @@
 #include "dsl.h"
 #include "internal.h"
+#include <string.h>
 #include "resources.rc"
 #include "gen/update_vert_bytecode.h"
 
@@ -43,6 +44,20 @@ grain_dsl_collect_vars(
 	for (int i = 0; i < num_members; ++i) {
 		const CSPV_ReflectionMember* member = &members[i];
 		if (member->name == ignored) { continue; }
+
+		// `grain_` is reserved
+		if (strncmp(member->name, "grain_", 6) == 0) {
+			grain_set_last_error(
+				grain,
+				grain_sprintf(
+					grain,
+					"`%s` block member `%s` uses the reserved `grain_` prefix",
+					block_name,
+					member->name
+				)
+			);
+			return false;
+		}
 
 		grain_dsl_var_t var = {
 			.name = member->name,

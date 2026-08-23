@@ -23,13 +23,12 @@ void main() {
 	ivec2 texel = ivec2(int(gid) % size.x, int(gid) / size.x);
 
 	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
-	float birth = grain_load_birth(texel);
 	ModuleParams params = grain_load_ModuleParams(region);
 	SystemClock clock = grain_load_SystemClock(region);
 
-	Schedule sch = grain_observe(birth, clock);
+	Schedule sch = grain_observe(particle.grain_birth, clock);
 
-	srand(gid, floatBitsToUint(birth));
+	srand(gid, floatBitsToUint(particle.grain_birth));
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;
