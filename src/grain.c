@@ -25,6 +25,12 @@ struct grain_archetype_s {
 	// Texture/channel of the hidden birth-time lane (see grain_define_archetype).
 	int birth_texture;
 	int birth_channel;
+
+	// Bumped on every redefinition.
+	uint32_t revision;
+
+	// Hash of the attribute list (name, type)
+	uint64_t attr_layout_hash;
 };
 
 struct grain_system_s {
@@ -37,6 +43,19 @@ typedef struct {
 	void* cpu;
 	bool dirty;
 } grain_ssbo_t;
+
+typedef struct {
+	const char* module_name;
+	const char* name;
+	CF_ShaderInfoDataType type;
+	int offset;
+	int size;
+} grain_param_slot_t;
+
+typedef struct {
+	CK_DYNA grain_param_slot_t* slots;
+	int stride;
+} grain_param_layout_t;
 
 struct grain_pool_s {
 	grain_t* grain;
@@ -62,6 +81,12 @@ struct grain_pool_s {
 
 	int pool_size;
 	int num_draws;
+
+	// Layout snapshot to detect reload
+	uint32_t archetype_revision;
+	uint64_t attr_layout_hash;
+	grain_param_layout_t update_layout;
+	grain_param_layout_t render_layout;
 };
 
 typedef struct {
@@ -509,6 +534,15 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	}
 	sappend(archetype_common, "};\n");
 
+	// FNV-1a over the ordered attribute list.
+	uint64_t attr_layout_hash = 0xcbf29ce484222325ull;
+	for (int i = 0; i < map_size(particle_attrs); ++i) {
+		for (const char* c = particle_attrs[i].var_info.name; *c; ++c) {
+			attr_layout_hash = (attr_layout_hash ^ (uint64_t)(unsigned char)*c) * 0x100000001b3ull;
+		}
+		attr_layout_hash = (attr_layout_hash ^ (uint64_t)particle_attrs[i].var_info.type) * 0x100000001b3ull;
+	}
+
 	int attr_total_size = 0;
 	for (int i = 0; i < map_size(particle_attrs); ++i) {
 		attr_total_size += grain_type_size(particle_attrs[i].var_info.type);
@@ -848,11 +882,14 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 
 	const char* interned_name = sintern(name);
 	archetype = map_get(grain->archetypes, interned_name);
+	uint32_t revision;
 	if (archetype == NULL) {
 		archetype = cf_alloc(sizeof(grain_archetype_t));
 		map_set(grain->archetypes, interned_name, archetype);
+		revision = 1;
 	} else {
 		grain_cleanup_archetype(archetype);
+		revision = archetype->revision + 1;
 	}
 
 	*archetype = (grain_archetype_t){
@@ -865,6 +902,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		.render_size = render_size,
 		.birth_texture = birth_lane / 4,
 		.birth_channel = birth_lane % 4,
+		.revision = revision,
+		.attr_layout_hash = attr_layout_hash,
 	};
 
 	// Calculate param offsets
@@ -1013,6 +1052,137 @@ grain_index_ssbo(grain_ssbo_t* ssbo, int item_size, int index) {
 	return cpu_mem;
 }
 
+static void
+grain_capture_layout_from_modules(
+	grain_param_layout_t* layout,
+	grain_archetype_t* archetype,
+	grain_module_info_t* modules,
+	int num_modules
+) {
+	for (int module_index = 0; module_index < asize(modules); ++module_index) {
+		grain_module_info_t* module = &modules[module_index];
+		for (int param_index = 0; param_index < module->num_params; ++param_index) {
+			grain_param_info_t param = archetype->params[module->first_params + param_index];
+			apush(layout->slots, ((grain_param_slot_t){
+				.module_name = module->name,
+				.name = param.name,
+				.type = param.type,
+				.offset = archetype->params_offsets[module->first_params + param_index],
+				.size = grain_type_size((CSPV_DataType)param.type),
+			}));
+		}
+	}
+}
+
+static void
+grain_capture_layout(grain_param_layout_t* layout, grain_archetype_t* archetype, bool render) {
+	layout->stride = render ? archetype->render_size : archetype->update_size;
+
+	if (render) {
+		grain_capture_layout_from_modules(layout, archetype, &archetype->renderer, 1);
+	} else {
+		grain_capture_layout_from_modules(layout, archetype, archetype->emitters, asize(archetype->emitters));
+		grain_capture_layout_from_modules(layout, archetype, archetype->affectors, asize(archetype->affectors));
+	}
+}
+
+static void
+grain_migrate_ssbo(
+	grain_ssbo_t* ssbo,
+	const grain_param_layout_t* old_layout,
+	const grain_param_layout_t* new_layout,
+	int max_systems
+) {
+	char* old_cpu = ssbo->cpu;
+	char* new_cpu = cf_alloc(new_layout->stride * max_systems);
+
+	for (int new_slot_index = 0; new_slot_index < asize(new_layout->slots); ++new_slot_index) {
+		const grain_param_slot_t* dst = &new_layout->slots[new_slot_index];
+		// Find the matching param and copy
+		for (int old_slot_index = 0; old_slot_index < asize(old_layout->slots); ++old_slot_index) {
+			const grain_param_slot_t* src = &old_layout->slots[old_slot_index];
+			if (
+				src->module_name == dst->module_name
+				&&
+				src->name == dst->name  // interned
+				&&
+				src->type == dst->type
+			) {
+				for (int system_index = 0; system_index < max_systems; ++system_index) {
+					memcpy(
+						new_cpu + system_index * new_layout->stride + dst->offset,
+						old_cpu + system_index * old_layout->stride + src->offset,
+						dst->size
+					);
+				}
+				break;
+			}
+		}
+	}
+
+	cf_destroy_storage_buffer(ssbo->gpu);
+	cf_free(old_cpu);
+	ssbo->gpu = cf_make_storage_buffer(cf_storage_buffer_defaults(new_layout->stride * max_systems));
+	ssbo->cpu = new_cpu;
+	ssbo->dirty = true;
+}
+
+static void
+grain_make_pool_canvases(grain_pool_t* pool) {
+	grain_archetype_t* archetype = pool->opts.archetype;
+
+	CF_CanvasParams canvas_params = cf_canvas_defaults(pool->pool_size, pool->opts.max_systems);
+	canvas_params.target_count = archetype->num_textures;
+	for (int i = 0; i < archetype->num_textures; ++i) {
+		canvas_params.targets[i].allocate_mipmaps = false;
+		canvas_params.targets[i].filter = CF_FILTER_NEAREST;
+		canvas_params.targets[i].wrap_u = CF_WRAP_MODE_CLAMP_TO_EDGE;
+		canvas_params.targets[i].wrap_v = CF_WRAP_MODE_CLAMP_TO_EDGE;
+		canvas_params.targets[i].pixel_format = CF_PIXEL_FORMAT_R32G32B32A32_FLOAT;
+	}
+	pool->canvases[0] = cf_make_canvas(canvas_params);
+	pool->canvases[1] = cf_make_canvas(canvas_params);
+
+	// A negative birth time marks a slot as never born. Everything else clears to zero
+	// so stale VRAM can never masquerade as a particle.
+	CF_Color never_born = { 0 };
+	((float*)&never_born)[archetype->birth_channel] = -1.f;
+	for (int i = 0; i < 2; ++i) {
+		cf_canvas_set_clear_color2(pool->canvases[i], archetype->birth_texture, never_born);
+		cf_clear_canvas(pool->canvases[i]);
+	}
+}
+
+static void
+grain_reconcile_pool(grain_pool_t* pool) {
+	grain_archetype_t* archetype = pool->opts.archetype;
+	if (pool->archetype_revision == archetype->revision) { return; }
+
+	grain_param_layout_t new_update = { 0 };
+	grain_param_layout_t new_render = { 0 };
+	grain_capture_layout(&new_update, archetype, false);
+	grain_capture_layout(&new_render, archetype, true);
+
+	// Migrate system parameters
+	grain_migrate_ssbo(&pool->update_ssbo, &pool->update_layout, &new_update, pool->opts.max_systems);
+	grain_migrate_ssbo(&pool->render_ssbo, &pool->render_layout, &new_render, pool->opts.max_systems);
+
+	afree(pool->update_layout.slots);
+	afree(pool->render_layout.slots);
+	pool->update_layout = new_update;
+	pool->render_layout = new_render;
+
+	// If attribute layout changed, reset all particles
+	if (pool->attr_layout_hash != archetype->attr_layout_hash) {
+		cf_destroy_canvas(pool->canvases[0]);
+		cf_destroy_canvas(pool->canvases[1]);
+		grain_make_pool_canvases(pool);
+		pool->attr_layout_hash = archetype->attr_layout_hash;
+	}
+
+	pool->archetype_revision = archetype->revision;
+}
+
 grain_pool_t*
 grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 	if (opts.max_emission_rate <= 0.f || opts.lifetime_budget <= 0.f) {
@@ -1042,25 +1212,11 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 	grain_init_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t) * opts.max_systems);
 	grain_init_ssbo(&pool->draw_list, sizeof(uint32_t) * opts.max_systems);
 
-	CF_CanvasParams canvas_params = cf_canvas_defaults(pool_size, opts.max_systems);
-	canvas_params.target_count = opts.archetype->num_textures;
-	for (int i = 0; i < opts.archetype->num_textures; ++i) {
-		canvas_params.targets[i].allocate_mipmaps = false;
-		canvas_params.targets[i].filter = CF_FILTER_NEAREST;
-		canvas_params.targets[i].wrap_u = CF_WRAP_MODE_CLAMP_TO_EDGE;
-		canvas_params.targets[i].wrap_v = CF_WRAP_MODE_CLAMP_TO_EDGE;
-		canvas_params.targets[i].pixel_format = CF_PIXEL_FORMAT_R32G32B32A32_FLOAT;
-	}
-	pool->canvases[0] = cf_make_canvas(canvas_params);
-	pool->canvases[1] = cf_make_canvas(canvas_params);
-
-	// A negative birth time marks a slot as never born. Everything else clears to zero
-	// so stale VRAM can never masquerade as a particle.
-	CF_Color never_born = { 0 };
-	((float*)&never_born)[opts.archetype->birth_channel] = -1.f;
-	for (int i = 0; i < 2; ++i) {
-		cf_canvas_set_clear_color2(pool->canvases[i], opts.archetype->birth_texture, never_born);
-	}
+	grain_make_pool_canvases(pool);
+	grain_capture_layout(&pool->update_layout, opts.archetype, false);
+	grain_capture_layout(&pool->render_layout, opts.archetype, true);
+	pool->archetype_revision = opts.archetype->revision;
+	pool->attr_layout_hash = opts.archetype->attr_layout_hash;
 
 	pool->material = cf_make_material();
 	cf_material_set_uniform_vs(pool->material, "grain_pool_size", &pool_size, CF_UNIFORM_TYPE_INT, 1);
@@ -1083,6 +1239,8 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 
 void
 grain_destroy_pool(grain_pool_t* pool) {
+	afree(pool->update_layout.slots);
+	afree(pool->render_layout.slots);
 	cf_free(pool->clocks);
 	cf_free(pool->systems);
 	cf_destroy_material(pool->material);
@@ -1167,6 +1325,8 @@ grain_find_system_hwm(grain_pool_t* pool) {
 
 static void
 grain_update_pool(grain_t* grain, grain_pool_t* pool) {
+	grain_reconcile_pool(pool);
+
 	int system_hwm = grain_find_system_hwm(pool);
 	grain_sync_ssbo(&pool->update_ssbo, (system_hwm + 1) * pool->opts.archetype->update_size);
 
@@ -1360,6 +1520,8 @@ grain_render(grain_system_t* system) {
 
 static void
 grain_render_pool(grain_t* grain, grain_pool_t* pool, CF_M3x2 transform) {
+	grain_reconcile_pool(pool);
+
 	int system_hwm = grain_find_system_hwm(pool);
 	grain_sync_ssbo(&pool->render_ssbo, pool->opts.archetype->render_size * (system_hwm + 1));
 	grain_sync_ssbo(&pool->draw_list, sizeof(uint32_t) * pool->num_draws);
