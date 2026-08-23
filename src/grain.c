@@ -35,7 +35,6 @@ struct grain_archetype_s {
 
 struct grain_system_s {
 	grain_pool_t* pool;
-	bool used;  // TODO: pack this into the pointer
 };
 
 typedef struct {
@@ -1233,9 +1232,6 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 
 	pool->systems = cf_alloc(sizeof(grain_system_t) * opts.max_systems);
 	memset(pool->systems, 0, sizeof(grain_system_t) * opts.max_systems);
-	for (int i = 0; i < opts.max_systems; ++i) {
-		pool->systems[i].pool = pool;
-	}
 
 	pool->clocks = cf_alloc(sizeof(grain_particle_clock_t) * opts.max_systems);
 
@@ -1261,9 +1257,9 @@ grain_destroy_pool(grain_pool_t* pool) {
 grain_system_t*
 grain_create_system(grain_pool_t* pool) {
 	for (int i = 0; i < pool->opts.max_systems; ++i) {
-		if (!pool->systems[i].used) {
+		if (pool->systems[i].pool == NULL) {
 			grain_system_t* system = &pool->systems[i];
-			system->used = true;
+			system->pool = pool;
 			grain_init_clock(&pool->clocks[i], pool->opts.lifetime_budget, 0.0);
 			return system;
 		}
@@ -1276,7 +1272,7 @@ void
 grain_destroy_system(grain_system_t* system) {
 	if (system == NULL) { return; }
 
-	system->used = false;
+	system->pool = NULL;
 }
 
 static void
@@ -1321,7 +1317,7 @@ grain_set_emission_rate(grain_system_t* system, float particles_per_second) {
 static int
 grain_find_system_hwm(grain_pool_t* pool) {
 	for (int i = pool->opts.max_systems - 1; i >= 0; --i) {
-		if (pool->systems[i].used) {
+		if (pool->systems[i].pool != NULL) {
 			return i;
 		}
 	}
@@ -1339,7 +1335,7 @@ grain_update_pool(grain_t* grain, grain_pool_t* pool) {
 	// not tick gets dt = 0 and an empty window, so this pass leaves it exactly as is.
 	for (int i = 0; i <= system_hwm; ++i) {
 		grain_clock_entry_t* entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), i);
-		if (pool->systems[i].used) {
+		if (pool->systems[i].pool != NULL) {
 			*entry = grain_snapshot_clock(&pool->clocks[i], pool->pool_size);
 		} else {
 			*entry = (grain_clock_entry_t){ 0 };
