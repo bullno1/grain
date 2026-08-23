@@ -1,0 +1,11 @@
+---
+CompileFlags:
+  CompilationDatabase: .build/linux/RelWithDebInfo-reloadable
+#CompileFlags:
+  #CompilationDatabase: .web/RelWithDebInfo
+  #Add:
+    #- --sysroot=/home/bullno1/.cache/emscripten/sysroot
+    #- -iwithsysroot/include/compat
+    #- -D__EMSCRIPTEN__
+  #Remove:
+    #- -sUSE_SDL=3

@@ -1,0 +1,52 @@
+#!/bin/sh -e
+
+BUILD_IMAGE=registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk:latest
+BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo}
+RELOADABLE=${RELOADABLE:-ON}
+
+if [ "${RELOADABLE}" = "ON" ]
+then
+	SUFFIX="reloadable"
+else
+	SUFFIX="static"
+fi
+
+BUILD_DIR="${BUILD_TYPE}-${SUFFIX}"
+
+. /etc/os-release || true
+
+mkdir -p .build/steamrt
+
+steamsdk() {
+	if [ "${ID}" = "steamrt" ]
+	then
+		"$@"
+	else
+		podman run \
+			--rm \
+			-v ~/.cache/ccache:/root/.cache/ccache \
+			-e CCACHE_DIR=/root/.cache/ccache \
+			-v $(pwd):/workspace \
+			-w /workspace \
+			${BUILD_IMAGE} \
+			"$@"
+	fi
+}
+
+if [ ! -f ".build/steamrt/${BUILD_DIR}/build.ninja" ]
+then
+	steamsdk cmake \
+		-G "Ninja" \
+		-B .build/steamrt/${BUILD_DIR} \
+		-DCMAKE_TOOLCHAIN_FILE=cmake/steamrt.cmake \
+		-DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+		-DRELOADABLE="${RELOADABLE}" \
+		-DPLATFORM_NAME="steamrt" \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+		-DCMAKE_C_COMPILER_LAUNCHER=ccache \
+		-DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+		.
+fi
+
+steamsdk cmake --build .build/steamrt/${BUILD_DIR}

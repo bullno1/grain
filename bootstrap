@@ -1,0 +1,18 @@
+#!/bin/bash -e
+
+main() {
+	lfs
+	sync_deps
+}
+
+lfs() {
+	git lfs install
+	git lfs pull
+}
+
+sync_deps() {
+	git submodule sync
+	git submodule update --init
+}
+
+main

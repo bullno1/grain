@@ -1,0 +1,12 @@
+#!/bin/sh -e
+
+BUILD_IMAGE=registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk:latest
+
+podman run \
+	--rm \
+	-it \
+	-v ~/.cache/ccache:/root/.cache/ccache \
+	-e CCACHE_DIR=/root/.cache/ccache \
+	-v $(pwd):/workspace \
+	-w /workspace \
+	${BUILD_IMAGE}

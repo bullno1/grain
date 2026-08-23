@@ -1,0 +1,25 @@
+#!/bin/sh -e
+
+BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo}
+BUILD_DIR="${BUILD_TYPE}"
+
+mkdir -p .build/web
+cd .build/web > /dev/null
+
+if [ ! -f "${BUILD_DIR}/build.ninja" ]
+then
+	embuilder build libc sdl3
+	emcmake cmake \
+		-G "Ninja" \
+		-B ${BUILD_DIR} \
+		-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+		-DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+		-DRELOADABLE=OFF \
+		-DPLATFORM_NAME="web" \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		-DCMAKE_C_COMPILER_LAUNCHER=ccache \
+		-DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+		../../
+fi
+
+cmake --build ${BUILD_DIR}

@@ -1,0 +1,13 @@
+#!/bin/sh -e
+
+export BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo}
+
+cmd/web/build $@ || true
+
+inotifywait -r -e CLOSE_WRITE -m src deps | \
+	while read path action file
+	do
+		clear
+		cmd/web/build $@ || true
+		echo "Done"
+	done

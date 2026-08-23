@@ -1,0 +1,7 @@
+#!/bin/sh -e
+
+BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo}
+
+BUILD_DIR="${BUILD_TYPE}-static"
+
+emrun bin/web/${BUILD_DIR}/grain-editor.html

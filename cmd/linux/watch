@@ -1,0 +1,12 @@
+#!/bin/sh -e
+
+cmd/linux/build || true
+
+inotifywait -r -e CLOSE_WRITE -m editor deps lib | \
+    while read path action file
+	do
+		clear
+		echo "Rebuilding"
+		cmd/linux/build || true
+		echo "Done"
+    done
