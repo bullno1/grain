@@ -89,6 +89,9 @@ grain_create_system(grain_pool_t* pool);
 void
 grain_destroy_system(grain_system_t* system);
 
+grain_archetype_t*
+grain_get_archetype(grain_system_t* system);
+
 void
 grain_begin_update(grain_t* grain);
 
@@ -120,6 +123,31 @@ grain_set_renderer_parameter(
 	const char* name,
 	const void* value
 );
+
+/**
+ * Get a raw pointer to a parameter inside the CPU-side buffer of this system.
+ *
+ * The pointer is transient: valid only until the next call into the library
+ * that touches this system's pool.
+ *
+ * Writes through the pointer must be followed by @ref grain_parameter_modified
+ * or they may never reach the GPU.
+ *
+ * @param system The particle system.
+ * @param param_index Index into grain_archetype_info_t::params (grain_module_info_t::first_params + i).
+ * @return Pointer to the parameter, or NULL if param_index is out of range.
+ */
+void*
+grain_get_parameter(grain_system_t* system, int param_index);
+
+/**
+ * Flag the buffer that owns this parameter for re-upload.
+ *
+ * @param system The particle system.
+ * @param param_index Index into grain_archetype_info_t::params.
+ */
+void
+grain_parameter_modified(grain_system_t* system, int param_index);
 
 void
 grain_end_update(grain_t* grain);

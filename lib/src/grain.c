@@ -990,6 +990,18 @@ fail:
 	return archetype;
 }
 
+grain_archetype_info_t
+grain_inspect_archetype(grain_archetype_t* archetype) {
+	return (grain_archetype_info_t){
+		.emitters = archetype->emitters,
+		.num_emitters = asize(archetype->emitters),
+		.affectors = archetype->affectors,
+		.num_affectors = asize(archetype->affectors),
+		.renderer = archetype->renderer,
+		.params = archetype->params,
+	};
+}
+
 void
 grain_set_last_error(grain_t* grain, const char* message) {
 	grain->last_error = message;
@@ -1275,6 +1287,11 @@ grain_destroy_system(grain_system_t* system) {
 	system->pool = NULL;
 }
 
+grain_archetype_t*
+grain_get_archetype(grain_system_t* system) {
+	return system->pool->opts.archetype;
+}
+
 static void
 grain_touch(grain_pool_t* pool) {
 	// Link pool to update list
@@ -1386,6 +1403,37 @@ grain_find_param(
 	return false;
 }
 
+static grain_ssbo_t*
+grain_resolve_param(grain_system_t* system, int param_index, void** value) {
+	grain_pool_t* pool = system->pool;
+	grain_archetype_t* archetype = pool->opts.archetype;
+	if (param_index < 0 || param_index >= asize(archetype->params)) { return NULL; }
+
+	grain_reconcile_pool(pool);
+
+	bool render = param_index >= archetype->renderer.first_params;
+	grain_ssbo_t* ssbo = render ? &pool->render_ssbo : &pool->update_ssbo;
+	if (value != NULL) {
+		int stride = render ? archetype->render_size : archetype->update_size;
+		int index = system - pool->systems;
+		*value = (char*)ssbo->cpu + stride * index + archetype->params_offsets[param_index];
+	}
+	return ssbo;
+}
+
+void*
+grain_get_parameter(grain_system_t* system, int param_index) {
+	void* value = NULL;
+	grain_resolve_param(system, param_index, &value);
+	return value;
+}
+
+void
+grain_parameter_modified(grain_system_t* system, int param_index) {
+	grain_ssbo_t* ssbo = grain_resolve_param(system, param_index, NULL);
+	if (ssbo != NULL) { ssbo->dirty = true; }
+}
+
 void
 grain_set_emitter_parameter(
 	grain_system_t* system,
@@ -1397,6 +1445,7 @@ grain_set_emitter_parameter(
 	int index = system - pool->systems;
 	grain_archetype_t* archetype = pool->opts.archetype;
 	if (emitter_index >= asize(archetype->emitters)) { return; }
+	grain_reconcile_pool(pool);
 
 	int param_offset;
 	int	param_size;
@@ -1424,6 +1473,7 @@ grain_set_affector_parameter(
 	int index = system - pool->systems;
 	grain_archetype_t* archetype = pool->opts.archetype;
 	if (affector_index >= asize(archetype->affectors)) { return; }
+	grain_reconcile_pool(pool);
 
 	int param_offset;
 	int	param_size;
@@ -1449,6 +1499,7 @@ grain_set_renderer_parameter(
 	grain_pool_t* pool = system->pool;
 	int index = system - pool->systems;
 	grain_archetype_t* archetype = pool->opts.archetype;
+	grain_reconcile_pool(pool);
 
 	int param_offset;
 	int	param_size;
