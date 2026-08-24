@@ -2,7 +2,7 @@
 
 cmd/linux/build || true
 
-inotifywait -r -e CLOSE_WRITE -m editor deps lib | \
+inotifywait -r -e CLOSE_WRITE -m editor deps lib tests | \
     while read path action file
 	do
 		clear

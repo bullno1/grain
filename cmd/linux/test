@@ -1,0 +1,15 @@
+#!/bin/sh -e
+
+BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo}
+RELOADABLE=${RELOADABLE:-ON}
+
+if [ "${RELOADABLE}" = "ON" ]
+then
+	SUFFIX="reloadable"
+else
+	SUFFIX="static"
+fi
+
+BUILD_DIR="${BUILD_TYPE}-${SUFFIX}"
+
+bin/linux/${BUILD_DIR}/grain-tests

@@ -18,6 +18,11 @@ struct grain_archetype_s {
 	CK_DYNA grain_param_info_t* params;
 	CK_DYNA int* params_offsets;
 
+	// Deep copies of module decorators: the archetype outlives module
+	// redefinitions. Exact-size so the pointers handed out never move.
+	grain_param_decorator_t* param_decorators;
+	grain_decorator_arg_t* param_decorator_args;
+
 	int num_textures;
 	int update_size;
 	int render_size;
@@ -127,22 +132,71 @@ grain_cleanup_archetype(grain_archetype_t* archetype) {
 	afree(archetype->affectors);
 	afree(archetype->params);
 	afree(archetype->params_offsets);
+	cf_free(archetype->param_decorators);
+	cf_free(archetype->param_decorator_args);
 	cf_destroy_shader(archetype->shaders.update_shader);
 	cf_destroy_shader(archetype->shaders.render_shader);
 }
 
-static void*
-grain_define_module(
+// Copies the source and blanks decorators out of the copy; the copy is what
+// gets compiled, so decorators never reach the GLSL compiler.
+static char*
+grain_strip_decorators(
 	grain_t* grain,
 	const char* source,
+	CK_DYNA grain_decorator_t** decorators,
+	CK_DYNA grain_decorator_arg_t** decorator_args
+) {
+	size_t source_len = strlen(source);
+	char* stripped = cf_alloc(source_len + 1);
+	memcpy(stripped, source, source_len + 1);
+
+	if (!grain_decorator_extract(grain, stripped, decorators, decorator_args)) {
+		cf_free(stripped);
+		afree(*decorators);
+		afree(*decorator_args);
+		*decorators = NULL;
+		*decorator_args = NULL;
+		return NULL;
+	}
+
+	return stripped;
+}
+
+// Takes ownership of `source` (already stripped) and the decorator arrays.
+static void*
+grain_define_module_stripped(
+	grain_t* grain,
+	char* source,
+	CK_DYNA grain_decorator_t* decorators,
+	CK_DYNA grain_decorator_arg_t* decorator_args,
 	CK_MAP(grain_module_t*)* module_store
 ) {
-	grain_reset_arena(grain);
-
 	grain_dsl_module_info_t* module_info = grain_dsl_parse_module(
 		grain, source, CSPV_STAGE_FRAGMENT
 	);
-	if (module_info == NULL) { return NULL; }
+	if (module_info == NULL) { goto fail; }
+
+	for (int i = 0; i < asize(decorators); ++i) {
+		bool found = false;
+		for (int j = 0; j < asize(module_info->module_params); ++j) {
+			if (module_info->module_params[j].name == decorators[i].param) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			grain_set_last_error(grain, grain_sprintf(
+				grain,
+				"Decorator `@%s` is attached to `%s` which is not a module parameter",
+				decorators[i].name, decorators[i].param
+			));
+			grain_dsl_free_module_info(module_info);
+			goto fail;
+		}
+	}
+	module_info->decorators = decorators;
+	module_info->decorator_args = decorator_args;
 
 	grain_module_t* module = map_get(*module_store, module_info->name);
 	if (module == NULL) {
@@ -154,12 +208,80 @@ grain_define_module(
 		grain_dsl_free_module_info(module->info);
 	}
 
-	size_t source_len = strlen(source);
-	module->source = cf_alloc(source_len + 1);
-	memcpy(module->source, source, source_len + 1);
+	module->source = source;
 	module->info = module_info;
 
 	return module;
+
+fail:
+	cf_free(source);
+	afree(decorators);
+	afree(decorator_args);
+	return NULL;
+}
+
+static void*
+grain_define_module(
+	grain_t* grain,
+	const char* source,
+	CK_MAP(grain_module_t*)* module_store
+) {
+	grain_reset_arena(grain);
+
+	CK_DYNA grain_decorator_t* decorators = NULL;
+	CK_DYNA grain_decorator_arg_t* decorator_args = NULL;
+	char* stripped = grain_strip_decorators(grain, source, &decorators, &decorator_args);
+	if (stripped == NULL) { return NULL; }
+
+	return grain_define_module_stripped(
+		grain, stripped, decorators, decorator_args, module_store
+	);
+}
+
+static void
+grain_copy_param_decorators(
+	grain_archetype_t* archetype,
+	const grain_dsl_module_info_t* module_info,
+	grain_param_info_t* param_info,
+	int* decorator_cursor,
+	int* arg_cursor
+) {
+	int first = *decorator_cursor;
+	for (int i = 0; i < asize(module_info->decorators); ++i) {
+		grain_decorator_t decorator = module_info->decorators[i];
+		if (decorator.param != param_info->name) { continue; }
+
+		int first_arg = *arg_cursor;
+		for (int j = 0; j < decorator.num_args; ++j) {
+			archetype->param_decorator_args[(*arg_cursor)++] =
+				module_info->decorator_args[decorator.first_arg + j];
+		}
+		archetype->param_decorators[(*decorator_cursor)++] = (grain_param_decorator_t){
+			.name = decorator.name,
+			.args = decorator.num_args > 0
+				? &archetype->param_decorator_args[first_arg]
+				: NULL,
+			.num_args = decorator.num_args,
+		};
+	}
+
+	int num = *decorator_cursor - first;
+	param_info->decorators = num > 0 ? &archetype->param_decorators[first] : NULL;
+	param_info->num_decorators = num;
+}
+
+static void
+grain_count_module_decorators(
+	const grain_dsl_module_info_t* module_info,
+	int* total_decorators,
+	int* total_args
+) {
+	*total_decorators += asize(module_info->decorators);
+	// Counted per entry: entries duplicated across declarators share arg
+	// ranges in the module but get their own copies here.
+	for (int i = 0; i < asize(module_info->decorators); ++i) {
+		*total_args += module_info->decorators[i].num_args;
+	}
 }
 
 static bool
@@ -477,15 +599,27 @@ grain_define_affector(grain_t* grain, const char* source) {
 
 grain_renderer_t*
 grain_define_renderer(grain_t* grain, const char* source) {
+	grain_reset_arena(grain);
+
+	CK_DYNA grain_decorator_t* decorators = NULL;
+	CK_DYNA grain_decorator_arg_t* decorator_args = NULL;
+	char* stripped = grain_strip_decorators(grain, source, &decorators, &decorator_args);
+	if (stripped == NULL) { return NULL; }
+
 	grain_dsl_module_info_t* vsh_info = grain_dsl_parse_module(
-		grain, source, CSPV_STAGE_VERTEX
+		grain, stripped, CSPV_STAGE_VERTEX
 	);
 	if (vsh_info == NULL) {
+		cf_free(stripped);
+		afree(decorators);
+		afree(decorator_args);
 		return NULL;
 	}
 	grain_dsl_free_module_info(vsh_info);
 
-	return grain_define_module(grain, source, &grain->renderers);
+	return grain_define_module_stripped(
+		grain, stripped, decorators, decorator_args, &grain->renderers
+	);
 }
 
 grain_archetype_t*
@@ -910,6 +1044,29 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		.attr_layout_hash = attr_layout_hash,
 	};
 
+	// Deep-copy storage for decorators
+	int total_decorators = 0;
+	int total_args = 0;
+	for (int i = 0; i < spec.num_emitters; ++i) {
+		grain_count_module_decorators(
+			((grain_module_t*)spec.emitters[i])->info, &total_decorators, &total_args
+		);
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		grain_count_module_decorators(
+			((grain_module_t*)spec.affectors[i])->info, &total_decorators, &total_args
+		);
+	}
+	grain_count_module_decorators(render_module->info, &total_decorators, &total_args);
+	archetype->param_decorators = total_decorators > 0
+		? cf_alloc(sizeof(grain_param_decorator_t) * total_decorators)
+		: NULL;
+	archetype->param_decorator_args = total_args > 0
+		? cf_alloc(sizeof(grain_decorator_arg_t) * total_args)
+		: NULL;
+	int decorator_cursor = 0;
+	int arg_cursor = 0;
+
 	// Calculate param offsets
 	offset = 0;
 	for (int i = 0; i < spec.num_emitters; ++i) {
@@ -930,6 +1087,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 				.name = var.name,
 				.type = (CF_ShaderInfoDataType)var.type,
 			};
+			grain_copy_param_decorators(
+				archetype, module->info, &param_info, &decorator_cursor, &arg_cursor
+			);
 			apush(archetype->params, param_info);
 			apush(archetype->params_offsets, offset);
 
@@ -954,6 +1114,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 				.name = var.name,
 				.type = (CF_ShaderInfoDataType)var.type,
 			};
+			grain_copy_param_decorators(
+				archetype, module->info, &param_info, &decorator_cursor, &arg_cursor
+			);
 			apush(archetype->params, param_info);
 			apush(archetype->params_offsets, offset);
 
@@ -977,6 +1140,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 			.name = var.name,
 			.type = (CF_ShaderInfoDataType)var.type,
 		};
+		grain_copy_param_decorators(
+			archetype, render_module->info, &param_info, &decorator_cursor, &arg_cursor
+		);
 		apush(archetype->params, param_info);
 		apush(archetype->params_offsets, offset);
 

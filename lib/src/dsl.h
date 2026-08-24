@@ -3,6 +3,7 @@
 
 #include <grain.h>
 #include <cute.h>
+#include "decorator.h"
 #define CSPV_API static
 #include "cute_spirv.h"
 
@@ -15,6 +16,8 @@ typedef struct {
 	const char* name;
 	CK_DYNA grain_dsl_var_t* particle_attrs;
 	CK_DYNA grain_dsl_var_t* module_params;
+	CK_DYNA grain_decorator_t* decorators;
+	CK_DYNA grain_decorator_arg_t* decorator_args;
 } grain_dsl_module_info_t;
 
 typedef struct {
@@ -47,6 +50,8 @@ grain_dsl_free_module_info(grain_dsl_module_info_t* module_info) {
 
 	afree(module_info->particle_attrs);
 	afree(module_info->module_params);
+	afree(module_info->decorators);
+	afree(module_info->decorator_args);
 	cf_free(module_info);
 }
 

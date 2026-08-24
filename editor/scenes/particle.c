@@ -99,6 +99,8 @@ init(void) {
 		"	vec2 velocity;\n"
 		")\n"
 		"Params(\n"
+		"	@range(0, max=100)\n"
+		"	@description(\"How much to push the particles down\")\n"
 		"	float gravity;\n"
 		")\n"
 		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
@@ -118,7 +120,7 @@ init(void) {
 		")\n"
 		"Params(\n"
 		"	vec2 size;\n"
-		"	uint color;\n"
+		"	@color uint color;\n"
 		")\n"
 		"#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX\n"
 		"void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
@@ -161,6 +163,36 @@ init(void) {
 	);
 	if (archetype == NULL) {
 		BLOG_ERROR("%s", grain_get_last_error(grain));
+	} else {
+		// Exercise the decorator reflection API
+		grain_archetype_info_t info = grain_inspect_archetype(archetype);
+		for (int i = 0; i < info.num_affectors + 1; ++i) {
+			const grain_module_info_t* module = i < info.num_affectors
+				? &info.affectors[i]
+				: &info.renderer;
+			for (int j = 0; j < module->num_params; ++j) {
+				const grain_param_info_t* param = &info.params[module->first_params + j];
+				for (int k = 0; k < param->num_decorators; ++k) {
+					BLOG_INFO(
+						"%s.%s: @%s (%d args)",
+						module->name, param->name,
+						param->decorators[k].name, param->decorators[k].num_args
+					);
+				}
+			}
+		}
+
+		// Mixed positional/named lookup: @range(0, max=100)
+		const grain_param_info_t* gravity = &info.params[info.affectors[1].first_params];
+		const grain_param_decorator_t* range = grain_find_decorator(gravity, "range");
+		grain_decorator_arg_t arg;
+		float min = grain_find_decorator_arg(range, 0, "min", &arg) ? arg.value.number : -1.f;
+		float max = grain_find_decorator_arg(range, 1, "max", &arg) ? arg.value.number : -1.f;
+		float step = grain_find_decorator_arg(range, 2, "step", &arg) ? arg.value.number : 0.5f;
+		BLOG_INFO("gravity range: min=%f max=%f step(default)=%f", min, max, step);
+		if (grain_find_decorator_arg(grain_find_decorator(gravity, "description"), 0, NULL, &arg)) {
+			BLOG_INFO("gravity description: %s", arg.value.string);
+		}
 	}
 
 	if (pool == NULL) {

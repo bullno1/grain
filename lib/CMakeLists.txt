@@ -1,6 +1,7 @@
 set(SOURCES
 	"src/grain.c"
 	"src/dsl.c"
+	"src/decorator.c"
 	"src/gen/update_vert_bytecode.h"
 )
 

@@ -2,6 +2,7 @@
 #define GRAIN_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <cute_graphics.h>
 
 typedef struct grain_s grain_t;
@@ -31,9 +32,32 @@ typedef struct {
 	float lifetime_budget;    // max lifetime in seconds
 } grain_pool_opts_t;
 
+typedef enum {
+	GRAIN_DECORATOR_ARG_NUMBER,
+	GRAIN_DECORATOR_ARG_STRING,
+} grain_decorator_arg_type_t;
+
+typedef struct {
+	int index;          // ordinal among positional arguments; -1 for named arguments
+	const char* name;   // NULL for positional arguments
+	grain_decorator_arg_type_t type;
+	union {
+		float number;
+		const char* string;
+	} value;
+} grain_decorator_arg_t;
+
+typedef struct {
+	const char* name;
+	const grain_decorator_arg_t* args;
+	int num_args;
+} grain_param_decorator_t;
+
 typedef struct {
 	const char* name;
 	CF_ShaderInfoDataType type;
+	const grain_param_decorator_t* decorators;
+	int num_decorators;
 } grain_param_info_t;
 
 typedef struct {
@@ -76,6 +100,25 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 
 grain_archetype_info_t
 grain_inspect_archetype(grain_archetype_t* archetype);
+
+//! Linear search of a parameter's decorators by name; NULL if absent.
+const grain_param_decorator_t*
+grain_find_decorator(const grain_param_info_t* param, const char* name);
+
+/**
+ * Find a decorator argument
+ *
+ * Python-style resolution: matches the positional argument with this index or
+ * the named argument with this name. Returns false if neither exists so the
+ * caller can fall back to a default
+ */
+bool
+grain_find_decorator_arg(
+	const grain_param_decorator_t* decorator,
+	int index,
+	const char* name,
+	grain_decorator_arg_t* out
+);
 
 grain_pool_t*
 grain_create_pool(grain_t* grain, grain_pool_opts_t opts);
