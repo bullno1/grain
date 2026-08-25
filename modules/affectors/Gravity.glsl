@@ -5,7 +5,7 @@ Requires(
 )
 
 Params(
-	@range(min = 0)
+	@range(min = 0, step = 0.1)
 	float gravity;
 )
 

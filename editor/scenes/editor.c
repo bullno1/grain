@@ -10,6 +10,7 @@
 #include <bco.h>
 #include <barray.h>
 #include <limits.h>
+#include <float.h>
 
 #ifndef __EMSCRIPTEN__
 #	define BRESMON_API static
@@ -73,6 +74,15 @@ SCENE_VAR(grain_system_t*, particle_system)
 SCENE_VAR(int, gui_emitter_index)
 SCENE_VAR(int, gui_affector_index)
 SCENE_VAR(int, gui_renderer_index)
+
+SCENE_VAR(bool, show_system)
+SCENE_VAR(float, emission_rate)
+// The pool options in effect; grain_pool_t is opaque so the editor tracks them
+SCENE_VAR(float, current_lifetime_budget)
+SCENE_VAR(float, current_max_emission_rate)
+// Edited in the System window, applied only when the pool is recreated
+SCENE_VAR(float, pending_lifetime_budget)
+SCENE_VAR(float, pending_max_emission_rate)
 
 static _Alignas(bco_align_t) char modal_action_storage[1024];
 static bco_t* modal_action = (bco_t*)modal_action_storage;
@@ -217,6 +227,30 @@ reinit_watch(CK_MAP(module_meta_t*) module_map) {
 }
 
 #endif
+
+static int
+param_type_size(CF_ShaderInfoDataType type) {
+	switch (type) {
+		case CF_SHADER_INFO_TYPE_SINT:
+		case CF_SHADER_INFO_TYPE_UINT:
+		case CF_SHADER_INFO_TYPE_FLOAT:
+			return 4;
+		case CF_SHADER_INFO_TYPE_SINT2:
+		case CF_SHADER_INFO_TYPE_UINT2:
+		case CF_SHADER_INFO_TYPE_FLOAT2:
+			return 8;
+		case CF_SHADER_INFO_TYPE_SINT3:
+		case CF_SHADER_INFO_TYPE_UINT3:
+		case CF_SHADER_INFO_TYPE_FLOAT3:
+			return 12;
+		case CF_SHADER_INFO_TYPE_SINT4:
+		case CF_SHADER_INFO_TYPE_UINT4:
+		case CF_SHADER_INFO_TYPE_FLOAT4:
+			return 16;
+		default:
+			return 0;
+	}
+}
 
 static bool
 show_module_list(CK_MAP(module_meta_t*) module_map, const char* label, int* current_item) {
@@ -542,8 +576,13 @@ init(void) {
 		show_affectors = true;
 		show_renderer = true;
 		show_log = false;
+		show_system = true;
 		log_auto_scroll = true;
 		gui_renderer_index = -1;
+
+		emission_rate = 10.f;
+		current_lifetime_budget = pending_lifetime_budget = 16.f;
+		current_max_emission_rate = pending_max_emission_rate = 512.f;
 
 		grain = grain_create();
 
@@ -583,9 +622,8 @@ init(void) {
 
 		pool = grain_create_pool(grain, (grain_pool_opts_t){
 			.archetype = archetype,
-			// TODO: Add options
-			.lifetime_budget = 16.f,
-			.max_emission_rate = 512,
+			.lifetime_budget = current_lifetime_budget,
+			.max_emission_rate = current_max_emission_rate,
 			.max_systems = 1,
 		});
 
@@ -622,6 +660,50 @@ cleanup(void) {
 	sfree(last_module_path);
 }
 
+// The new pool is created before the old one is destroyed so that a rejected
+// configuration (grain_create_pool validates it) leaves the current pool running.
+static void
+recreate_pool(grain_archetype_info_t* archetype_info) {
+	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
+		.archetype = archetype,
+		.lifetime_budget = pending_lifetime_budget,
+		.max_emission_rate = pending_max_emission_rate,
+		.max_systems = 1,
+	});
+	if (new_pool == NULL) {
+		BLOG_ERROR("Could not recreate pool: %s", grain_get_last_error(grain));
+		show_error(grain_get_last_error(grain));
+		return;
+	}
+
+	grain_system_t* new_system = grain_create_system(new_pool);
+
+	// Module params live in the pool's buffers; carry them over so Apply does
+	// not reset everything the user has tuned.
+	int num_params = archetype_info->renderer.first_param + archetype_info->renderer.num_params;
+	for (int i = 0; i < num_params; ++i) {
+		int size = param_type_size(archetype_info->params[i].type);
+		void* src = grain_get_parameter(particle_system, i);
+		void* dst = grain_get_parameter(new_system, i);
+		if (src != NULL && dst != NULL && size > 0) {
+			memcpy(dst, src, size);
+			grain_parameter_modified(new_system, i);
+		}
+	}
+
+	grain_destroy_pool(pool);
+	pool = new_pool;
+	particle_system = new_system;
+
+	current_lifetime_budget = pending_lifetime_budget;
+	current_max_emission_rate = pending_max_emission_rate;
+
+	BLOG_INFO(
+		"Recreated pool: %.1f particles/s max, %.1fs lifetime budget",
+		current_max_emission_rate, current_lifetime_budget
+	);
+}
+
 static void
 update(void) {
 	cf_app_update(NULL);
@@ -653,6 +735,10 @@ update(void) {
 				show_renderer = !show_renderer;
 			}
 
+			if (ImGui_MenuItemEx("System", NULL, show_system, true)) {
+				show_system = !show_system;
+			}
+
 			if (ImGui_MenuItemEx("Log", NULL, show_log, true)) {
 				show_log = !show_log;
 			}
@@ -664,7 +750,47 @@ update(void) {
 
 	grain_archetype_info_t archetype_info = grain_inspect_archetype(archetype);
 	grain_begin_update(grain);
-	grain_set_emission_rate(particle_system, 10.f);
+	grain_set_emission_rate(particle_system, emission_rate);
+
+	if (show_system) {
+		if (ImGui_Begin("System", &show_system, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui_DragFloatEx(
+				"Emission rate", &emission_rate,
+				1.f, 0.f, current_max_emission_rate, "%.1f/s",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+
+			ImGui_SeparatorText("Pool");
+			ImGui_DragFloatEx(
+				"Lifetime budget", &pending_lifetime_budget,
+				0.1f, 0.1f, FLT_MAX, "%.1fs",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+			ImGui_DragFloatEx(
+				"Max emission rate", &pending_max_emission_rate,
+				1.f, 1.f, FLT_MAX, "%.1f/s",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+			ImGui_TextDisabled(
+				"Pool capacity: %d particles",
+				(int)ceilf(pending_max_emission_rate * pending_lifetime_budget)
+			);
+
+			bool pool_dirty =
+				pending_lifetime_budget != current_lifetime_budget
+				|| pending_max_emission_rate != current_max_emission_rate;
+			ImGui_BeginDisabled(!pool_dirty);
+			if (ImGui_Button("Apply")) {
+				recreate_pool(&archetype_info);
+			}
+			ImGui_EndDisabled();
+			if (pool_dirty) {
+				ImGui_SameLine();
+				ImGui_TextDisabledUnformatted("Recreates the pool; live particles reset");
+			}
+		}
+		ImGui_End();
+	}
 
 	if (show_emitters) {
 		if (ImGui_Begin("Emitters", &show_emitters, ImGuiWindowFlags_AlwaysAutoResize)) {
