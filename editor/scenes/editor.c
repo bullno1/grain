@@ -23,14 +23,8 @@
 		} \
 	} while (0)
 
-typedef enum {
-	GRAIN_MODULE_EMITTER,
-	GRAIN_MODULE_AFFECTOR,
-	GRAIN_MODULE_RENDERER,
-} module_type_t;
-
 typedef struct {
-	module_type_t type;
+	grain_module_kind_t type;
 	void* module;
 	char* source;
 
@@ -68,7 +62,7 @@ static const char* popup_error = NULL;
 static bool
 load_module_from_file(
 	ufa_open_file_t* open_file,
-	module_type_t module_type,
+	grain_module_kind_t module_type,
 	void** module_out,
 	char** source_out
 ) {
@@ -83,37 +77,24 @@ load_module_from_file(
 		sappend_range(source_buf, read_buf, read_buf + size);
 	}
 
-	const char* name = NULL;
-	CK_MAP(module_meta_t*)* module_map = NULL;
 	void* module = NULL;
 	const char* path = ufa_get_open_file_name(open_file);
 	char** last_path = NULL;
 
 	switch (module_type) {
 		case GRAIN_MODULE_EMITTER: {
-			grain_emitter_t* emitter = grain_define_emitter(grain, source_buf);
-
-			name = grain_get_emitter_name(emitter);
-			module_map = &emitters;
-			module = emitter;
+			module = grain_define_emitter(grain, source_buf);
 			last_path = &last_emitter_path;
 		} break;
 		case GRAIN_MODULE_AFFECTOR: {
-			grain_affector_t* affector = grain_define_affector(grain, source_buf);
-
-			name = grain_get_affector_name(affector);
-			module_map = &emitters;
-			module = affector;
+			module = grain_define_affector(grain, source_buf);
 			last_path = &last_affector_path;
 		} break;
 		case GRAIN_MODULE_RENDERER: {
-			grain_renderer_t* renderer = grain_define_renderer(grain, source_buf);
-
-			name = grain_get_renderer_name(renderer);
-			module_map = &renderers;
-			module = renderer;
+			module = grain_define_renderer(grain, source_buf);
 			last_path = &last_renderer_path;
 		} break;
+		default: return false;
 	}
 
 	if (module != NULL) {
@@ -197,7 +178,7 @@ show_error(const char* error) {
 	popup_error = error;
 }
 
-bco_static(load_module, module_type_t type) {
+bco_static(load_module, grain_module_kind_t type) {
 	bco_vars(
 		barena_t arena;
 		ufa_open_file_t* open_file;
@@ -206,7 +187,7 @@ bco_static(load_module, module_type_t type) {
 	bco_begin
 	begin_native_modal();
 
-	char* last_path;
+	char* last_path = NULL;
 	switch (bco_arg(type)) {
 		case GRAIN_MODULE_EMITTER: {
 			last_path = last_emitter_path;
@@ -217,6 +198,7 @@ bco_static(load_module, module_type_t type) {
 		case GRAIN_MODULE_RENDERER: {
 			last_path = last_renderer_path;
 		} break;
+		default: break;
 	}
 
 	barena_init(&bco_var(arena), bgame_arena_pool);
@@ -256,7 +238,7 @@ bco_static(load_module, module_type_t type) {
 		} break;
 		case GRAIN_MODULE_AFFECTOR: {
 			name = grain_get_affector_name(module);
-			module_map = &emitters;
+			module_map = &affectors;
 			type_name = "affector";
 		} break;
 		case GRAIN_MODULE_RENDERER: {
@@ -264,6 +246,7 @@ bco_static(load_module, module_type_t type) {
 			module_map = &renderers;
 			type_name = "renderer";
 		} break;
+		default: bco_return();
 	}
 
 	module_meta_t* module_meta = map_get(*module_map, name);

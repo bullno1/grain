@@ -1,4 +1,4 @@
-Module(Lifetime)
+Emitter(Lifetime)
 
 Requires(
 	float lifetime;

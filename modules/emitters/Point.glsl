@@ -1,4 +1,4 @@
-Module(Point)
+Emitter(Point)
 
 Requires(
 	vec2 position;

@@ -163,19 +163,29 @@ grain_strip_decorators(
 	return stripped;
 }
 
-// Takes ownership of `source` (already stripped) and the decorator arrays.
-static void*
-grain_define_module_stripped(
-	grain_t* grain,
-	char* source,
-	CK_DYNA grain_decorator_t* decorators,
-	CK_DYNA grain_decorator_arg_t* decorator_args,
-	CK_MAP(grain_module_t*)* module_store
-) {
+static grain_dsl_module_info_t*
+grain_analyze_module(grain_t* grain, const char* source, char** stripped_out) {
+	CK_DYNA grain_decorator_t* decorators = NULL;
+	CK_DYNA grain_decorator_arg_t* decorator_args = NULL;
+	char* stripped = grain_strip_decorators(grain, source, &decorators, &decorator_args);
+	if (stripped == NULL) { return NULL; }
+
 	grain_dsl_module_info_t* module_info = grain_dsl_parse_module(
-		grain, source, CSPV_STAGE_FRAGMENT
+		grain, stripped, CSPV_STAGE_FRAGMENT
 	);
 	if (module_info == NULL) { goto fail; }
+
+	// A renderer also has a vertex stage; it has to compile too
+	if (module_info->kind == GRAIN_MODULE_RENDERER) {
+		grain_dsl_module_info_t* vsh_info = grain_dsl_parse_module(
+			grain, stripped, CSPV_STAGE_VERTEX
+		);
+		if (vsh_info == NULL) {
+			grain_dsl_free_module_info(module_info);
+			goto fail;
+		}
+		grain_dsl_free_module_info(vsh_info);
+	}
 
 	for (int i = 0; i < asize(decorators); ++i) {
 		bool found = false;
@@ -198,6 +208,31 @@ grain_define_module_stripped(
 	module_info->decorators = decorators;
 	module_info->decorator_args = decorator_args;
 
+	*stripped_out = stripped;
+	return module_info;
+
+fail:
+	cf_free(stripped);
+	afree(decorators);
+	afree(decorator_args);
+	return NULL;
+}
+
+// Takes ownership of `module_info` and `source` (already stripped).
+static void*
+grain_store_module(
+	grain_t* grain,
+	grain_dsl_module_info_t* module_info,
+	char* source
+) {
+	CK_MAP(grain_module_t*)* module_store = NULL;
+	switch (module_info->kind) {
+		case GRAIN_MODULE_EMITTER: module_store = &grain->emitters; break;
+		case GRAIN_MODULE_AFFECTOR: module_store = &grain->affectors; break;
+		case GRAIN_MODULE_RENDERER: module_store = &grain->renderers; break;
+		case GRAIN_MODULE_INVALID: break;  // unreachable: parse would have failed
+	}
+
 	grain_module_t* module = map_get(*module_store, module_info->name);
 	if (module == NULL) {
 		module = cf_alloc(sizeof(grain_module_t));
@@ -212,30 +247,44 @@ grain_define_module_stripped(
 	module->info = module_info;
 
 	return module;
+}
 
-fail:
-	cf_free(source);
-	afree(decorators);
-	afree(decorator_args);
-	return NULL;
+static const char*
+grain_module_kind_name(grain_module_kind_t kind) {
+	switch (kind) {
+		case GRAIN_MODULE_EMITTER: return "an emitter";
+		case GRAIN_MODULE_AFFECTOR: return "an affector";
+		case GRAIN_MODULE_RENDERER: return "a renderer";
+		default: return "invalid";
+	}
 }
 
 static void*
-grain_define_module(
+grain_define_module_of_kind(
 	grain_t* grain,
 	const char* source,
-	CK_MAP(grain_module_t*)* module_store
+	grain_module_kind_t expected_kind
 ) {
 	grain_reset_arena(grain);
 
-	CK_DYNA grain_decorator_t* decorators = NULL;
-	CK_DYNA grain_decorator_arg_t* decorator_args = NULL;
-	char* stripped = grain_strip_decorators(grain, source, &decorators, &decorator_args);
-	if (stripped == NULL) { return NULL; }
+	char* stripped = NULL;
+	grain_dsl_module_info_t* module_info = grain_analyze_module(grain, source, &stripped);
+	if (module_info == NULL) { return NULL; }
 
-	return grain_define_module_stripped(
-		grain, stripped, decorators, decorator_args, module_store
-	);
+	if (module_info->kind != expected_kind) {
+		grain_set_last_error(grain, grain_sprintf(
+			grain,
+			"`%s` is declared as %s, cannot be defined as %s",
+			module_info->name,
+			grain_module_kind_name(module_info->kind),
+			grain_module_kind_name(expected_kind)
+		));
+		grain_dsl_free_module_info(module_info);
+		cf_free(stripped);
+		return NULL;
+	}
+
+	return grain_store_module(grain, module_info, stripped);
 }
 
 static void
@@ -587,39 +636,38 @@ grain_get_last_error(grain_t* grain) {
 	return grain->last_error;
 }
 
+grain_module_ref_t
+grain_define_module(grain_t* grain, const char* source) {
+	grain_reset_arena(grain);
+
+	char* stripped = NULL;
+	grain_dsl_module_info_t* module_info = grain_analyze_module(grain, source, &stripped);
+	if (module_info == NULL) { return (grain_module_ref_t){ 0 }; }
+
+	grain_module_ref_t ref = { .kind = module_info->kind };
+	void* module = grain_store_module(grain, module_info, stripped);
+	switch (ref.kind) {
+		case GRAIN_MODULE_EMITTER: ref.emitter = module; break;
+		case GRAIN_MODULE_AFFECTOR: ref.affector = module; break;
+		case GRAIN_MODULE_RENDERER: ref.renderer = module; break;
+		case GRAIN_MODULE_INVALID: break;  // unreachable: parse would have failed
+	}
+	return ref;
+}
+
 grain_emitter_t*
 grain_define_emitter(grain_t* grain, const char* source) {
-	return grain_define_module(grain, source, &grain->emitters);
+	return grain_define_module_of_kind(grain, source, GRAIN_MODULE_EMITTER);
 }
 
 grain_affector_t*
 grain_define_affector(grain_t* grain, const char* source) {
-	return grain_define_module(grain, source, &grain->affectors);
+	return grain_define_module_of_kind(grain, source, GRAIN_MODULE_AFFECTOR);
 }
 
 grain_renderer_t*
 grain_define_renderer(grain_t* grain, const char* source) {
-	grain_reset_arena(grain);
-
-	CK_DYNA grain_decorator_t* decorators = NULL;
-	CK_DYNA grain_decorator_arg_t* decorator_args = NULL;
-	char* stripped = grain_strip_decorators(grain, source, &decorators, &decorator_args);
-	if (stripped == NULL) { return NULL; }
-
-	grain_dsl_module_info_t* vsh_info = grain_dsl_parse_module(
-		grain, stripped, CSPV_STAGE_VERTEX
-	);
-	if (vsh_info == NULL) {
-		cf_free(stripped);
-		afree(decorators);
-		afree(decorator_args);
-		return NULL;
-	}
-	grain_dsl_free_module_info(vsh_info);
-
-	return grain_define_module_stripped(
-		grain, stripped, decorators, decorator_args, &grain->renderers
-	);
+	return grain_define_module_of_kind(grain, source, GRAIN_MODULE_RENDERER);
 }
 
 const char*
@@ -757,7 +805,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 
 	// Import update modules
 	sappend(archetype_update, "\n");
-	sappend(archetype_update, "#define Module(X)\n");
+	sappend(archetype_update, "#define Emitter(X)\n");
+	sappend(archetype_update, "#define Affector(X)\n");
 	sappend(archetype_update, "#define Requires(X)\n");
 	for (int i = 0; i < spec.num_emitters; ++i) {
 		grain_module_t* module = (grain_module_t*)spec.emitters[i];
@@ -959,7 +1008,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(archetype_render, "};\n");
 
 	// Import module
-	sappend    (archetype_render, "#define Module(X)\n");
+	sappend    (archetype_render, "#define Renderer(X)\n");
 	sappend    (archetype_render, "#define Requires(X)\n");
 	sappend    (archetype_render, "#define Params(X)\n");
 	sfmt_append(archetype_render, "#include \"renderer/%s\"\n", render_module->info->name);

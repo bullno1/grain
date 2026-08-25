@@ -18,7 +18,7 @@ init(void) {
 
 	grain_emitter_t* point_emitter = grain_define_emitter(
 		grain,
-		"Module(Point)\n"
+		"Emitter(Point)\n"
 		"Requires(\n"
 		"	vec2 position;\n"
 		"	vec2 velocity;\n"
@@ -43,7 +43,7 @@ init(void) {
 
 	grain_emitter_t* lifetime_init = grain_define_emitter(
 		grain,
-		"Module(Lifetime)\n"
+		"Emitter(Lifetime)\n"
 		"Requires(\n"
 		"	float lifetime;\n"
 		")\n"
@@ -61,7 +61,7 @@ init(void) {
 
 	grain_affector_t* age_affector = grain_define_affector(
 		grain,
-		"Module(Age)\n"
+		"Affector(Age)\n"
 		"Requires(\n"
 		"	float lifetime;\n"
 		")\n"
@@ -77,7 +77,7 @@ init(void) {
 
 	grain_affector_t* integrate_affector = grain_define_affector(
 		grain,
-		"Module(Integrate)\n"
+		"Affector(Integrate)\n"
 		"Requires(\n"
 		"	vec2 position;\n"
 		"	vec2 velocity;\n"
@@ -94,7 +94,7 @@ init(void) {
 
 	grain_affector_t* gravity_affector = grain_define_affector(
 		grain,
-		"Module(Gravity)\n"
+		"Affector(Gravity)\n"
 		"Requires(\n"
 		"	vec2 velocity;\n"
 		")\n"
@@ -114,7 +114,7 @@ init(void) {
 
 	grain_renderer_t* renderer = grain_define_renderer(
 		grain,
-		"Module(Quad)\n"
+		"Renderer(Quad)\n"
 		"Requires(\n"
 		"	vec2 position;\n"
 		"	float lifetime;\n"

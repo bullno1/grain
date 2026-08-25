@@ -48,13 +48,13 @@ extract(const char* source) {
 static void
 expect_scan_error(const char* params_body, const char* error_fragment) {
 	char source[1024];
-	snprintf(source, sizeof(source), "Module(T)\nParams(\n%s\n)\n", params_body);
+	snprintf(source, sizeof(source), "Affector(T)\nParams(\n%s\n)\n", params_body);
 	BTEST_EXPECT(!extract(source));
 	GRAIN_EXPECT_ERROR_CONTAINS(error_fragment);
 }
 
 static const char* decorated_source =
-	"Module(Gravity)\n"
+	"Affector(Gravity)\n"
 	"Requires(\n"
 	"	vec2 velocity;\n"
 	")\n"
@@ -189,7 +189,7 @@ BTEST(scanner, parses_ident_args) {
 }
 
 BTEST(scanner, no_params_block_is_a_noop) {
-	BTEST_ASSERT(extract("Module(T)\nvoid process() {}\n"));
+	BTEST_ASSERT(extract("Affector(T)\nvoid process() {}\n"));
 	BTEST_EXPECT_EQUAL("%d", asize(fixture.decorators), 0);
 }
 

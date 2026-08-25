@@ -1,4 +1,4 @@
-Module(Gravity)
+Affector(Gravity)
 
 Requires(
 	vec2 velocity;

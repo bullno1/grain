@@ -1,4 +1,4 @@
-Module(Age)
+Affector(Age)
 
 Requires(
 	float lifetime;

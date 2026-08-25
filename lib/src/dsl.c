@@ -339,11 +339,14 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 		return NULL;
 	}
 
-	const char* module_block_name = sintern("Grain__Inspect_Module");
+	const char* emitter_block_name = sintern("Grain__Inspect_Emitter");
+	const char* affector_block_name = sintern("Grain__Inspect_Affector");
+	const char* renderer_block_name = sintern("Grain__Inspect_Renderer");
 	const char* requires_block_name = sintern("Grain__Inspect_Requires");
 	const char* params_block_name = sintern("Grain__Inspect_Params");
 
 	const char* module_name = NULL;
+	grain_module_kind_t module_kind = GRAIN_MODULE_INVALID;
 	CK_DYNA grain_dsl_var_t* particle_attrs = NULL;
 	CK_DYNA grain_dsl_var_t* module_params = NULL;
 
@@ -356,13 +359,27 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 
 	for (int i = 0; i < asize(reflection->uniform_blocks); ++i) {
 		const CSPV_ReflectionBlock* uniform_block = &reflection->uniform_blocks[i];
-		if (uniform_block->name == module_block_name) {
+		grain_module_kind_t declared_kind = GRAIN_MODULE_INVALID;
+		if (uniform_block->name == emitter_block_name) {
+			declared_kind = GRAIN_MODULE_EMITTER;
+		} else if (uniform_block->name == affector_block_name) {
+			declared_kind = GRAIN_MODULE_AFFECTOR;
+		} else if (uniform_block->name == renderer_block_name) {
+			declared_kind = GRAIN_MODULE_RENDERER;
+		}
+
+		if (declared_kind != GRAIN_MODULE_INVALID) {
 			if (uniform_block->num_members != 1) {
-				grain_set_last_error(grain, "Invalid Module block");
+				grain_set_last_error(grain, "Invalid module declaration");
+				goto fail;
+			}
+			if (module_kind != GRAIN_MODULE_INVALID) {
+				grain_set_last_error(grain, "Multiple module declarations");
 				goto fail;
 			}
 
 			module_name = reflection->uniform_members[uniform_block->first_member].name;
+			module_kind = declared_kind;
 		} else if (uniform_block->name == requires_block_name) {
 			if (!grain_dsl_collect_vars(
 					grain,
@@ -388,13 +405,14 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 	}
 
 	if (module_name == NULL) {
-		grain_set_last_error(grain, "Missing `Module` block");
+		grain_set_last_error(grain, "Missing module declaration: `Emitter`, `Affector`, or `Renderer`");
 		goto fail;
 	}
 
 	grain_dsl_module_info_t* module_info = cf_alloc(sizeof(grain_dsl_module_info_t));
 	*module_info = (grain_dsl_module_info_t){
 		.name = module_name,
+		.kind = module_kind,
 		.particle_attrs = particle_attrs,
 		.module_params = module_params,
 	};

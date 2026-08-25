@@ -1,4 +1,4 @@
-Module(Integrate)
+Affector(Integrate)
 
 Requires(
 	vec2 position;

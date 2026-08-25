@@ -12,7 +12,7 @@ static btest_suite_t module = {
 BTEST(module, decorated_module_compiles_and_stores) {
 	grain_emitter_t* emitter = grain_define_emitter(
 		test_grain(),
-		"Module(Gravity)\n"
+		"Emitter(Gravity)\n"
 		"Requires(\n"
 		"	vec2 velocity;\n"
 		")\n"
@@ -53,7 +53,7 @@ BTEST(module, decorated_module_compiles_and_stores) {
 BTEST(module, redefinition_replaces_decorators) {
 	grain_emitter_t* emitter = grain_define_emitter(
 		test_grain(),
-		"Module(Gravity)\n"
+		"Emitter(Gravity)\n"
 		"Requires(\n"
 		"	vec2 velocity;\n"
 		")\n"
@@ -67,7 +67,7 @@ BTEST(module, redefinition_replaces_decorators) {
 	// Live reload: same module name, new decorators
 	grain_emitter_t* redefined = grain_define_emitter(
 		test_grain(),
-		"Module(Gravity)\n"
+		"Emitter(Gravity)\n"
 		"Requires(\n"
 		"	vec2 velocity;\n"
 		")\n"
@@ -88,7 +88,7 @@ BTEST(module, renderer_params_support_decorators) {
 	// The renderer path strips once but parses twice (vertex + fragment)
 	grain_renderer_t* renderer = grain_define_renderer(
 		test_grain(),
-		"Module(Quad)\n"
+		"Renderer(Quad)\n"
 		"Requires(\n"
 		"	vec2 position;\n"
 		")\n"
@@ -117,7 +117,7 @@ BTEST(module, renderer_params_support_decorators) {
 BTEST(module, qualified_declaration_binds_to_the_member) {
 	grain_emitter_t* emitter = grain_define_emitter(
 		test_grain(),
-		"Module(Qualified)\n"
+		"Emitter(Qualified)\n"
 		"Requires(\n"
 		"	vec2 velocity;\n"
 		")\n"
@@ -138,7 +138,7 @@ BTEST(module, decorator_outside_params_is_a_compile_error) {
 	// reach the compiler and fail there instead of being silently accepted.
 	grain_emitter_t* emitter = grain_define_emitter(
 		test_grain(),
-		"Module(Bad)\n"
+		"Emitter(Bad)\n"
 		"Requires(\n"
 		"	@color vec2 velocity;\n"
 		")\n"
@@ -153,7 +153,7 @@ BTEST(module, decorator_outside_params_is_a_compile_error) {
 BTEST(module, malformed_decorator_fails_with_grain_error) {
 	grain_emitter_t* emitter = grain_define_emitter(
 		test_grain(),
-		"Module(Bad2)\n"
+		"Emitter(Bad2)\n"
 		"Requires(\n"
 		"	vec2 velocity;\n"
 		")\n"

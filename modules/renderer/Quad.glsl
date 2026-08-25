@@ -1,4 +1,4 @@
-Module(Quad)
+Renderer(Quad)
 
 Requires(
 	vec2 position;

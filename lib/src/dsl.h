@@ -14,6 +14,7 @@ typedef struct {
 
 typedef struct {
 	const char* name;
+	grain_module_kind_t kind;
 	CK_DYNA grain_dsl_var_t* particle_attrs;
 	CK_DYNA grain_dsl_var_t* module_params;
 	CK_DYNA grain_decorator_t* decorators;

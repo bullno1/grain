@@ -13,6 +13,28 @@ typedef struct grain_archetype_s grain_archetype_t;
 typedef struct grain_pool_s grain_pool_t;
 typedef struct grain_system_s grain_system_t;
 
+typedef enum {
+	GRAIN_MODULE_INVALID = 0,
+	GRAIN_MODULE_EMITTER,
+	GRAIN_MODULE_AFFECTOR,
+	GRAIN_MODULE_RENDERER,
+} grain_module_kind_t;
+
+/**
+ * A module along with its kind, as declared in its source
+ *
+ * Only the union member matching `kind` is valid.
+ * `kind` is GRAIN_MODULE_INVALID when definition failed.
+ */
+typedef struct {
+	grain_module_kind_t kind;
+	union {
+		grain_emitter_t* emitter;
+		grain_affector_t* affector;
+		grain_renderer_t* renderer;
+	};
+} grain_module_ref_t;
+
 typedef struct {
 	grain_emitter_t** emitters;
 	int num_emitters;
@@ -86,6 +108,16 @@ grain_destroy(grain_t* grain);
 
 const char*
 grain_get_last_error(grain_t* grain);
+
+/**
+ * Define a module of whatever kind its source declares
+ *
+ * The declared kind is returned so the caller can dispatch on it.
+ * Use the typed variants below instead when a specific kind is expected: they
+ * reject a module of any other kind.
+ */
+grain_module_ref_t
+grain_define_module(grain_t* grain, const char* source);
 
 grain_emitter_t*
 grain_define_emitter(grain_t* grain, const char* source);

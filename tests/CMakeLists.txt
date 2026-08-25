@@ -8,6 +8,7 @@ set(SOURCES
 	"scanner.c"
 	"find.c"
 	"module.c"
+	"kind.c"
 )
 
 add_executable(grain-tests "${SOURCES}")
