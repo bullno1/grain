@@ -13,3 +13,6 @@
 [submodule "deps/clay"]
 	path = deps/clay
 	url = https://github.com/bullno1/clay.git
+[submodule "deps/ufa"]
+	path = deps/ufa
+	url = https://github.com/bullno1/ufa.git

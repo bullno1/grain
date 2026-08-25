@@ -19,6 +19,7 @@ BTEST(module, decorated_module_compiles_and_stores) {
 		"Params(\n"
 		"	@range(0, max=100)\n"
 		"	@description(\"How much to push\")\n"
+		"	@widget(type=SLIDER)\n"
 		"	float gravity;\n"
 		")\n"
 		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
@@ -32,10 +33,11 @@ BTEST(module, decorated_module_compiles_and_stores) {
 	// compiler to trip on later.
 	BTEST_EXPECT(strchr(stored->source, '@') == NULL);
 
-	BTEST_ASSERT_EQUAL("%d", asize(stored->info->decorators), 2);
+	BTEST_ASSERT_EQUAL("%d", asize(stored->info->decorators), 3);
 	BTEST_EXPECT(stored->info->decorators[0].name == sintern("range"));
 	BTEST_EXPECT(stored->info->decorators[0].param == sintern("gravity"));
 	BTEST_EXPECT(stored->info->decorators[1].name == sintern("description"));
+	BTEST_EXPECT(stored->info->decorators[2].name == sintern("widget"));
 
 	grain_decorator_arg_t* args = stored->info->decorator_args;
 	BTEST_EXPECT_EQUAL("%d", args[0].index, 0);
@@ -43,6 +45,9 @@ BTEST(module, decorated_module_compiles_and_stores) {
 	BTEST_EXPECT(args[1].name == sintern("max"));
 	BTEST_EXPECT_EQUAL("%f", args[1].value.number, 100.f);
 	BTEST_EXPECT(args[2].value.string == sintern("How much to push"));
+	BTEST_EXPECT_EQUAL("%d", args[3].type, GRAIN_DECORATOR_ARG_IDENT);
+	BTEST_EXPECT(args[3].name == sintern("type"));
+	BTEST_EXPECT(args[3].value.string == sintern("SLIDER"));
 }
 
 BTEST(module, redefinition_replaces_decorators) {
@@ -158,5 +163,6 @@ BTEST(module, malformed_decorator_fails_with_grain_error) {
 		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {}"
 	);
 	BTEST_EXPECT(emitter == NULL);
-	GRAIN_EXPECT_ERROR_CONTAINS("Expected `=`");
+	// `float` parses as an ident value, so `gravity` is the offending token
+	GRAIN_EXPECT_ERROR_CONTAINS("Expected `,` or `)`");
 }

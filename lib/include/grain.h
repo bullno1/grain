@@ -35,6 +35,7 @@ typedef struct {
 typedef enum {
 	GRAIN_DECORATOR_ARG_NUMBER,
 	GRAIN_DECORATOR_ARG_STRING,
+	GRAIN_DECORATOR_ARG_IDENT,
 } grain_decorator_arg_type_t;
 
 typedef struct {

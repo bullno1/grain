@@ -62,6 +62,68 @@ grain_blank(char* start, char* end) {
 	}
 }
 
+// Parses one argument value: a "string", a bare identifier, or a number.
+static bool
+grain_parse_decorator_value(
+	grain_t* grain,
+	char** pos_ptr,
+	const char* decorator_name,
+	grain_decorator_arg_t* arg
+) {
+	char* pos = *pos_ptr;
+
+	if (*pos == '"') {
+		++pos;
+		char buf[1024];
+		int len = 0;
+		while (*pos != '"') {
+			char c = *pos;
+			if (c == '\0' || c == '\n') {
+				grain_set_last_error(grain, grain_sprintf(
+					grain, "Unterminated string in decorator `@%s`", decorator_name
+				));
+				return false;
+			}
+			if (c == '\\' && (pos[1] == '"' || pos[1] == '\\')) {
+				c = pos[1];
+				++pos;
+			}
+			if (len >= (int)sizeof(buf) - 1) {
+				grain_set_last_error(grain, grain_sprintf(
+					grain, "String too long in decorator `@%s`", decorator_name
+				));
+				return false;
+			}
+			buf[len++] = c;
+			++pos;
+		}
+		++pos;
+		buf[len] = '\0';
+		arg->type = GRAIN_DECORATOR_ARG_STRING;
+		arg->value.string = sintern(buf);
+	} else if (grain_is_ident_start(*pos)) {
+		char* start = pos;
+		while (grain_is_ident_char(*pos)) { ++pos; }
+		arg->type = GRAIN_DECORATOR_ARG_IDENT;
+		arg->value.string = sintern_range(start, pos);
+	} else {
+		char* end;
+		float number = strtof(pos, &end);
+		if (end == pos) {
+			grain_set_last_error(grain, grain_sprintf(
+				grain, "Expected an argument value in decorator `@%s`", decorator_name
+			));
+			return false;
+		}
+		arg->type = GRAIN_DECORATOR_ARG_NUMBER;
+		arg->value.number = number;
+		pos = end;
+	}
+
+	*pos_ptr = pos;
+	return true;
+}
+
 static bool
 grain_parse_decorator(
 	grain_t* grain,
@@ -93,63 +155,29 @@ grain_parse_decorator(
 
 			grain_decorator_arg_t arg = { .index = -1 };
 			if (grain_is_ident_start(*pos)) {
-				char* arg_name_start = pos;
+				char* ident_start = pos;
 				while (grain_is_ident_char(*pos)) { ++pos; }
-				arg.name = sintern_range(arg_name_start, pos);
-				if (!grain_skip_space(&pos) || *pos != '=') {
-					grain_set_last_error(grain, grain_sprintf(
-						grain, "Expected `=` after argument `%s` of decorator `@%s`",
-						arg.name, decorator.name
-					));
-					return false;
+				const char* ident = sintern_range(ident_start, pos);
+
+				// `name = value` vs a bare ident value: decided by the `=`
+				char* peek = pos;
+				if (grain_skip_space(&peek) && *peek == '=') {
+					arg.name = ident;
+					pos = peek + 1;
+					if (!grain_skip_space(&pos)) { goto unterminated; }
+					if (!grain_parse_decorator_value(grain, &pos, decorator.name, &arg)) {
+						return false;
+					}
+				} else {
+					arg.index = positional_index++;
+					arg.type = GRAIN_DECORATOR_ARG_IDENT;
+					arg.value.string = ident;
 				}
-				++pos;
-				if (!grain_skip_space(&pos)) { goto unterminated; }
 			} else {
 				arg.index = positional_index++;
-			}
-
-			if (*pos == '"') {
-				++pos;
-				char buf[1024];
-				int len = 0;
-				while (*pos != '"') {
-					char c = *pos;
-					if (c == '\0' || c == '\n') {
-						grain_set_last_error(grain, grain_sprintf(
-							grain, "Unterminated string in decorator `@%s`", decorator.name
-						));
-						return false;
-					}
-					if (c == '\\' && (pos[1] == '"' || pos[1] == '\\')) {
-						c = pos[1];
-						++pos;
-					}
-					if (len >= (int)sizeof(buf) - 1) {
-						grain_set_last_error(grain, grain_sprintf(
-							grain, "String too long in decorator `@%s`", decorator.name
-						));
-						return false;
-					}
-					buf[len++] = c;
-					++pos;
-				}
-				++pos;
-				buf[len] = '\0';
-				arg.type = GRAIN_DECORATOR_ARG_STRING;
-				arg.value.string = sintern(buf);
-			} else {
-				char* end;
-				float number = strtof(pos, &end);
-				if (end == pos) {
-					grain_set_last_error(grain, grain_sprintf(
-						grain, "Expected an argument value in decorator `@%s`", decorator.name
-					));
+				if (!grain_parse_decorator_value(grain, &pos, decorator.name, &arg)) {
 					return false;
 				}
-				arg.type = GRAIN_DECORATOR_ARG_NUMBER;
-				arg.value.number = number;
-				pos = end;
 			}
 
 			apush(*args, arg);

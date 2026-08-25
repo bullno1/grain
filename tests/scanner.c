@@ -165,22 +165,47 @@ BTEST(scanner, binds_to_the_last_word_ignoring_qualifiers_and_types) {
 	BTEST_EXPECT(fixture.decorators[2].param == sintern("b"));
 }
 
+BTEST(scanner, parses_ident_args) {
+	BTEST_ASSERT_EX(
+		extract(
+			"Params(\n"
+			"	@widget(SLIDER, type=COLOR_WHEEL) float gravity;\n"
+			")\n"
+		),
+		"%s", grain_get_last_error(test_grain())
+	);
+	BTEST_ASSERT_EQUAL("%d", asize(fixture.decorators), 1);
+	BTEST_ASSERT_EQUAL("%d", fixture.decorators[0].num_args, 2);
+
+	grain_decorator_arg_t* args = &fixture.args[fixture.decorators[0].first_arg];
+	BTEST_EXPECT_EQUAL("%d", args[0].index, 0);
+	BTEST_EXPECT(args[0].name == NULL);
+	BTEST_EXPECT_EQUAL("%d", args[0].type, GRAIN_DECORATOR_ARG_IDENT);
+	BTEST_EXPECT(args[0].value.string == sintern("SLIDER"));
+	BTEST_EXPECT_EQUAL("%d", args[1].index, -1);
+	BTEST_EXPECT(args[1].name == sintern("type"));
+	BTEST_EXPECT_EQUAL("%d", args[1].type, GRAIN_DECORATOR_ARG_IDENT);
+	BTEST_EXPECT(args[1].value.string == sintern("COLOR_WHEEL"));
+}
+
 BTEST(scanner, no_params_block_is_a_noop) {
 	BTEST_ASSERT(extract("Module(T)\nvoid process() {}\n"));
 	BTEST_EXPECT_EQUAL("%d", asize(fixture.decorators), 0);
 }
 
-BTEST(scanner, rejects_missing_equals_in_named_arg) {
+BTEST(scanner, rejects_two_values_without_separator) {
+	// `min` parses as a positional ident value, so the `0` is the offender
 	expect_scan_error(
 		"@range(min 0) float gravity;",
-		"Expected `=` after argument `min`"
+		"Expected `,` or `)`"
 	);
 }
 
 BTEST(scanner, rejects_declaration_inside_unclosed_arg_list) {
+	// `float` parses as an ident value, so `gravity` is the offender
 	expect_scan_error(
 		"@range(min=0, float gravity;",
-		"Expected `=` after argument `float`"
+		"Expected `,` or `)`"
 	);
 }
 
@@ -193,7 +218,7 @@ BTEST(scanner, rejects_unterminated_string) {
 
 BTEST(scanner, rejects_non_value_argument) {
 	expect_scan_error(
-		"@range(min=oops) float gravity;",
+		"@range(min=$) float gravity;",
 		"Expected an argument value"
 	);
 }
