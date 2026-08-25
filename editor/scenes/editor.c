@@ -8,6 +8,7 @@
 #include <grain.h>
 #include <dcimgui.h>
 #include <bco.h>
+#include <barray.h>
 
 #ifndef __EMSCRIPTEN__
 #	define BRESMON_API static
@@ -33,10 +34,20 @@ typedef struct {
 #endif
 } module_meta_t;
 
+typedef struct {
+	int offset;
+	int len;
+	blog_level_t level;
+} log_entry_t;
+
 SCENE_VAR(grain_t*, grain)
 SCENE_VAR(bool, show_emitters)
 SCENE_VAR(bool, show_affectors)
 SCENE_VAR(bool, show_renderer)
+SCENE_VAR(bool, show_log)
+SCENE_VAR(bool, log_auto_scroll)
+SCENE_VAR(char*, log_text)
+SCENE_VAR(barray(log_entry_t), log_lines)
 SCENE_VAR(char*, tmp_source_buf)
 
 SCENE_VAR(char*, last_module_path)
@@ -58,6 +69,56 @@ static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
 
 static bool should_popup_error = false;
+
+// Both reset on live reload, in sync with blog's own logger registry which
+// also lives in (bgame's) statics.
+static bool log_sink_hooked = false;
+static bool log_sink_active = false;
+
+static void
+editor_log_sink(const blog_ctx_t* ctx, blog_str_t msg, void* userdata) {
+	(void)userdata;
+	if (!log_sink_active) { return; }
+
+	const char* line_begin = msg.data;
+	const char* msg_end = msg.data + msg.len;
+	while (line_begin < msg_end) {
+		const char* line_end = memchr(line_begin, '\n', (size_t)(msg_end - line_begin));
+		if (line_end == NULL) { line_end = msg_end; }
+
+		log_entry_t entry = {
+			.offset = slen(log_text),
+			.len = (int)(line_end - line_begin),
+			.level = ctx->level,
+		};
+		sappend_range(log_text, line_begin, line_end);
+		barray_push(log_lines, entry, scene_allocator);
+
+		line_begin = line_end + 1;
+	}
+}
+
+static void
+hook_log_sink(void) {
+	if (!log_sink_hooked) {
+		blog_add_logger(BLOG_LEVEL_TRACE, editor_log_sink, NULL);
+		log_sink_hooked = true;
+	}
+	log_sink_active = true;
+}
+
+static ImVec4
+log_level_color(blog_level_t level) {
+	switch (level) {
+		case BLOG_LEVEL_TRACE: return (ImVec4){ 0.5f, 0.5f, 0.5f, 1.0f };
+		case BLOG_LEVEL_DEBUG: return (ImVec4){ 0.4f, 0.7f, 1.0f, 1.0f };
+		case BLOG_LEVEL_INFO:  return (ImVec4){ 0.9f, 0.9f, 0.9f, 1.0f };
+		case BLOG_LEVEL_WARN:  return (ImVec4){ 1.0f, 0.8f, 0.2f, 1.0f };
+		case BLOG_LEVEL_ERROR: return (ImVec4){ 1.0f, 0.4f, 0.4f, 1.0f };
+		case BLOG_LEVEL_FATAL: return (ImVec4){ 1.0f, 0.2f, 0.6f, 1.0f };
+		default:               return (ImVec4){ 1.0f, 1.0f, 1.0f, 1.0f };
+	}
+}
 
 static const char*
 read_open_file(ufa_open_file_t* open_file) {
@@ -144,6 +205,10 @@ reinit_watch(CK_MAP(module_meta_t*) module_map) {
 }
 
 #endif
+
+static void
+show_module_list(CK_MAP(module_meta_t*) module_map, const char* label, int* current_item) {
+}
 
 static void
 begin_native_modal(void) {
@@ -273,6 +338,8 @@ cleanup_module_map(CK_MAP(module_meta_t*)* module_map) {
 
 static void
 after_reload(void) {
+	hook_log_sink();
+
 #ifndef __EMSCRIPTEN__
 	reinit_watch(emitters);
 	reinit_watch(affectors);
@@ -284,10 +351,14 @@ static void
 init(void) {
 	cf_clear_color(0.5f, 0.5f, 0.5f, 0.0f);
 
+	hook_log_sink();
+
 	if (bgame_current_scene_state() == BGAME_SCENE_INITIALIZING) {
 		show_emitters = true;
 		show_affectors = true;
 		show_renderer = true;
+		show_log = false;
+		log_auto_scroll = true;
 
 		grain = grain_create();
 
@@ -299,6 +370,10 @@ init(void) {
 
 static void
 cleanup(void) {
+	log_sink_active = false;
+	sfree(log_text);
+	barray_free(log_lines, scene_allocator);
+
 #ifndef __EMSCRIPTEN__
 	bresmon_destroy(bresmon);
 #endif
@@ -341,6 +416,10 @@ update(void) {
 				show_renderer = !show_renderer;
 			}
 
+			if (ImGui_MenuItemEx("Log", NULL, show_log, true)) {
+				show_log = !show_log;
+			}
+
 			ImGui_EndMenu();
 		}
 		ImGui_EndMainMenuBar();
@@ -360,6 +439,43 @@ update(void) {
 
 	if (show_renderer) {
 		if (ImGui_Begin("Renderer", &show_emitters, ImGuiWindowFlags_AlwaysAutoResize)) {
+		}
+		ImGui_End();
+	}
+
+	if (show_log) {
+		if (ImGui_Begin("Log", &show_log, 0)) {
+			if (ImGui_Button("Clear")) {
+				sclear(log_text);
+				barray_clear(log_lines);
+			}
+			ImGui_SameLine();
+			ImGui_Checkbox("Auto-scroll", &log_auto_scroll);
+			ImGui_Separator();
+
+			if (ImGui_BeginChild(
+					"##scroll",
+					(ImVec2){ 0.0f, 0.0f },
+					0,
+					ImGuiWindowFlags_HorizontalScrollbar
+			)) {
+				ImGuiListClipper clipper = { 0 };
+				ImGuiListClipper_Begin(&clipper, (int)barray_len(log_lines), -1.0f);
+				while (ImGuiListClipper_Step(&clipper)) {
+					for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+						log_entry_t entry = log_lines[i];
+						const char* line = log_text + entry.offset;
+						ImGui_PushStyleColorImVec4(ImGuiCol_Text, log_level_color(entry.level));
+						ImGui_TextUnformattedEx(line, line + entry.len);
+						ImGui_PopStyleColor();
+					}
+				}
+
+				if (log_auto_scroll && ImGui_GetScrollY() >= ImGui_GetScrollMaxY()) {
+					ImGui_SetScrollHereY(1.0f);
+				}
+			}
+			ImGui_EndChild();
 		}
 		ImGui_End();
 	}
