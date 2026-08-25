@@ -850,8 +850,10 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 			offset += grain_type_size(var.type);
 		}
 	}
-	// Padding to multiple of 16
+	// Padding to multiple of 16.
+	// GLSL forbids empty structs so even a paramless archetype pads to one texel.
 	int padded_size = ((offset + 16 - 1) / GRAIN_TEXTURE_CAPACITY) * GRAIN_TEXTURE_CAPACITY;
+	if (padded_size == 0) { padded_size = GRAIN_TEXTURE_CAPACITY; }
 	for (int i = 0; i < (padded_size - offset) / 4; ++i) {
 		sfmt_append(archetype_update, "\tfloat grain_padding_%d;\n", i);
 	}
@@ -993,8 +995,10 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		offset = ((offset + alignment - 1) / alignment) * alignment;
 		offset += grain_type_size(var.type);
 	}
-	// Padding to multiple of 16
+	// Padding to multiple of 16.
+	// GLSL forbids empty structs so even a paramless renderer pads to one texel.
 	padded_size = ((offset + 16 - 1) / GRAIN_TEXTURE_CAPACITY) * GRAIN_TEXTURE_CAPACITY;
+	if (padded_size == 0) { padded_size = GRAIN_TEXTURE_CAPACITY; }
 	for (int i = 0; i < (padded_size - offset) / 4; ++i) {
 		sfmt_append(archetype_render, "\tfloat grain_padding_%d;\n", i);
 	}
