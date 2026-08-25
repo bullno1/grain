@@ -48,16 +48,14 @@ static void
 init(int argc, const char** argv) {
 	// Cute Framework
 	if (!app_created) {
-		int width  = 640;
-		int height = 360;
+		int width  = 800;
+		int height = 600;
 
 		BLOG_INFO("Creating app");
 		int options =
 			  CF_APP_OPTIONS_WINDOW_POS_CENTERED_BIT
 			| CF_APP_OPTIONS_FILE_SYSTEM_DONT_DEFAULT_MOUNT_BIT
-#if __EMSCRIPTEN__
 			| CF_APP_OPTIONS_RESIZABLE_BIT
-#endif
 			;
 		CF_Result result = cf_make_app(WINDOW_TITLE, 0, 0, 0, width, height, options, argv[0]);
 		if (result.code != CF_RESULT_SUCCESS) {
@@ -75,14 +73,9 @@ init(int argc, const char** argv) {
 		cf_app_set_size(window_width, window_height);
 #endif
 
-		result = cf_fs_mount("./assets", "/assets", true);
-		if (result.code != CF_RESULT_SUCCESS) {
-			BLOG_WARN("Could not mount %s: %s", ".", result.details);
-		}
-
 		cf_app_init_imgui();
 
-		bgame_push_scene("particle");
+		bgame_push_scene("editor");
 
 		app_created = true;
 	}

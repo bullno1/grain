@@ -4,7 +4,7 @@ export BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo}
 
 cmd/web/build $@ || true
 
-inotifywait -r -e CLOSE_WRITE -m src deps | \
+inotifywait -r -e CLOSE_WRITE -m lib editor deps | \
 	while read path action file
 	do
 		clear

@@ -102,6 +102,15 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 grain_archetype_info_t
 grain_inspect_archetype(grain_archetype_t* archetype);
 
+const char*
+grain_get_emitter_name(grain_emitter_t* emitter);
+
+const char*
+grain_get_affector_name(grain_affector_t* affector);
+
+const char*
+grain_get_renderer_name(grain_renderer_t* renderer);
+
 //! Linear search of a parameter's decorators by name; NULL if absent.
 const grain_param_decorator_t*
 grain_find_decorator(const grain_param_info_t* param, const char* name);

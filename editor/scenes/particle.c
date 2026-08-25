@@ -101,6 +101,7 @@ init(void) {
 		"Params(\n"
 		"	@range(0, max=100)\n"
 		"	@description(\"How much to push the particles down\")\n"
+		"	@widget(type=SLIDER)\n"
 		"	float gravity;\n"
 		")\n"
 		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"

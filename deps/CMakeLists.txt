@@ -42,3 +42,6 @@ target_include_directories(blibs INTERFACE blibs)
 # --- clay ---
 add_library(clay INTERFACE)
 target_include_directories(clay INTERFACE clay)
+
+# --- ufa ---
+add_subdirectory("ufa" EXCLUDE_FROM_ALL)

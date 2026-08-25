@@ -622,6 +622,21 @@ grain_define_renderer(grain_t* grain, const char* source) {
 	);
 }
 
+const char*
+grain_get_emitter_name(grain_emitter_t* emitter) {
+	return emitter != NULL ? ((grain_module_t*)emitter)->info->name : NULL;
+}
+
+const char*
+grain_get_affector_name(grain_affector_t* affector) {
+	return affector != NULL ? ((grain_module_t*)affector)->info->name : NULL;
+}
+
+const char*
+grain_get_renderer_name(grain_renderer_t* renderer) {
+	return renderer != NULL ? ((grain_module_t*)renderer)->info->name : NULL;
+}
+
 grain_archetype_t*
 grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t spec) {
 	grain_reset_arena(grain);
