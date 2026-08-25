@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <cute.h>
 #include <blog.h>
 #define BGAME_SCENE_NAME editor
@@ -6,6 +7,12 @@
 #include <grain.h>
 #include <dcimgui.h>
 #include <bco.h>
+
+#ifndef __EMSCRIPTEN__
+#	define BRESMON_API static
+#	include <bresmon.h>
+#endif
+
 #define UFA_ARENA_TYPE barena_t
 #include <ufa.h>
 
@@ -16,26 +23,34 @@
 		} \
 	} while (0)
 
-typedef struct {
-	char* source;
-	char* path;
-	void* module;
-} module_extra_t;
-
 typedef enum {
 	GRAIN_MODULE_EMITTER,
 	GRAIN_MODULE_AFFECTOR,
 	GRAIN_MODULE_RENDERER,
 } module_type_t;
 
+typedef struct {
+	module_type_t type;
+	void* module;
+	char* source;
+
+#ifndef __EMSCRIPTEN__
+	bresmon_watch_t* watch;
+#endif
+} module_meta_t;
+
 SCENE_VAR(grain_t*, grain)
 SCENE_VAR(bool, show_emitters)
 SCENE_VAR(bool, show_affectors)
 SCENE_VAR(bool, show_renderer)
 SCENE_VAR(char*, source_buf)
-SCENE_VAR(CK_MAP(module_extra_t), emitters)
-SCENE_VAR(CK_MAP(module_extra_t), affectors)
-SCENE_VAR(CK_MAP(module_extra_t), renderers)
+SCENE_VAR(CK_MAP(module_meta_t*), emitters)
+SCENE_VAR(CK_MAP(module_meta_t*), affectors)
+SCENE_VAR(CK_MAP(module_meta_t*), renderers)
+
+#ifndef __EMSCRIPTEN__
+SCENE_VAR(bresmon_t*, bresmon)
+#endif
 
 static _Alignas(bco_align_t) char modal_action_storage[1024];
 static bco_t* modal_action = (bco_t*)modal_action_storage;
@@ -43,6 +58,102 @@ static bool native_modal_guard = false;
 static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
 static const char* popup_error = NULL;
+
+static bool
+load_module_from_file(
+	ufa_open_file_t* open_file,
+	module_type_t module_type,
+	void** module_out,
+	char** source_out
+) {
+	char read_buf[1024];
+	sclear(source_buf);
+	while (true) {
+		size_t size = sizeof(read_buf);
+		if (ufa_read_open_file(open_file, read_buf, &size) != UFA_OK) {
+			return false;
+		}
+		if (size == 0) { break; }
+		sappend_range(source_buf, read_buf, read_buf + size);
+	}
+
+	const char* name = NULL;
+	CK_MAP(module_meta_t*)* module_map = NULL;
+	void* module = NULL;
+	switch (module_type) {
+		case GRAIN_MODULE_EMITTER: {
+			grain_emitter_t* emitter = grain_define_emitter(grain, source_buf);
+
+			name = grain_get_emitter_name(emitter);
+			module_map = &emitters;
+			module = emitter;
+		} break;
+		case GRAIN_MODULE_AFFECTOR: {
+			grain_affector_t* affector = grain_define_affector(grain, source_buf);
+
+			name = grain_get_affector_name(affector);
+			module_map = &emitters;
+			module = affector;
+		} break;
+		case GRAIN_MODULE_RENDERER: {
+			grain_renderer_t* renderer = grain_define_renderer(grain, source_buf);
+
+			name = grain_get_renderer_name(renderer);
+			module_map = &renderers;
+			module = renderer;
+		} break;
+	}
+
+	if (module != NULL) {
+		*module_out = module;
+		sset(*source_out, source_buf);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+#ifndef __EMSCRIPTEN__
+
+static void
+reload_module(const char* path, void* userdata) {
+	module_meta_t* module_meta = userdata;
+
+	barena_t arena;
+	barena_init(&arena, bgame_arena_pool);
+
+	ufa_open_file_t* file = ufa_begin_reopen_file(
+		(ufa_config_t){
+			.arena = &arena,
+			.memalign = barena_memalign
+		},
+		path
+	);
+
+	if (load_module_from_file(file, module_meta->type, &module_meta->module, &module_meta->source)) {
+		BLOG_INFO("Reloaded %s", path);
+	} else {
+		BLOG_ERROR("Error while reloading %s: %s", path, grain_get_last_error(grain));
+	}
+
+end:
+	ufa_end_open_file(file);
+	barena_reset(&arena);
+}
+
+static void
+watch_module(const char* path, module_meta_t* module_meta) {
+	bresmon_init_watch(bresmon, &module_meta->watch, path, reload_module, module_meta);
+}
+
+static void
+reinit_watch(CK_MAP(module_meta_t*) module_map) {
+	for (int i = 0; i < map_size(module_map); ++i) {
+		bresmon_set_watch_callback(module_map[i]->watch, reload_module, module_map[i]);
+	}
+}
+
+#endif
 
 static void
 begin_native_modal(void) {
@@ -89,63 +200,53 @@ bco_static(load_module, module_type_t type) {
 		bco_yield();
 	}
 
-	char read_buf[1024];
-	sclear(source_buf);
-	while (true) {
-		size_t size = sizeof(read_buf);
-		if (ufa_read_open_file(bco_var(open_file), read_buf, &size) != UFA_OK) {
-			bco_return();
-		}
-		if (size == 0) { break; }
-		sappend_range(source_buf, read_buf, read_buf + size);
+	void* module = NULL;
+	char* source = NULL;
+	if (!load_module_from_file(bco_var(open_file), bco_arg(type), &module, &source)) {
+		const char* error = grain_get_last_error(grain);
+		show_error(error);
+		BLOG_ERROR("Error while loading %s: %s", ufa_get_open_file_name(bco_var(open_file)), error);
+		bco_return();
 	}
 
 	const char* name = NULL;
-	CK_MAP(module_extra_t)* module_map = NULL;
-	void* module = NULL;
+	CK_MAP(module_meta_t*)* module_map = NULL;
 	const char* type_name = NULL;
 	switch (bco_arg(type)) {
 		case GRAIN_MODULE_EMITTER: {
-			grain_emitter_t* emitter = grain_define_emitter(grain, source_buf);
-
-			name = grain_get_emitter_name(emitter);
+			name = grain_get_emitter_name(module);
 			module_map = &emitters;
-			module = emitter;
 			type_name = "emitter";
 		} break;
 		case GRAIN_MODULE_AFFECTOR: {
-			grain_affector_t* affector = grain_define_affector(grain, source_buf);
-
-			name = grain_get_affector_name(affector);
+			name = grain_get_affector_name(module);
 			module_map = &emitters;
-			module = affector;
 			type_name = "affector";
 		} break;
 		case GRAIN_MODULE_RENDERER: {
-			grain_renderer_t* renderer = grain_define_renderer(grain, source_buf);
-
-			name = grain_get_renderer_name(renderer);
+			name = grain_get_renderer_name(module);
 			module_map = &renderers;
-			module = renderer;
 			type_name = "renderer";
 		} break;
 	}
 
-	if (module == NULL) {
-		const char* error = grain_get_last_error(grain);
-		show_error(error);
-		BLOG_ERROR("Error whilel loading %s: %s", ufa_get_open_file_name(bco_var(open_file)), error);
-		bco_return();
-	}
+	module_meta_t* module_meta = map_get(*module_map, name);
+	if (module_meta == NULL) {
+		module_meta = bgame_malloc(sizeof(module_meta_t), scene_allocator);
+		map_set(*module_map, name, module_meta);
+		*module_meta = (module_meta_t){
+			.type = bco_arg(type),
+			.module = module,
+		};
 
-	module_extra_t* module_extra = map_get_ptr(*module_map, name);
-	if (module_extra == NULL) {
-		map_set(*module_map, name, ((module_extra_t){ 0 }));
-		module_extra = map_get_ptr(*module_map, name);
+#ifndef __EMSCRIPTEN__
+		watch_module(ufa_get_open_file_name(bco_var(open_file)), module_meta);
+#endif
 	}
-	module_extra->module = module;
-	sset(module_extra->path, ufa_get_open_file_name(bco_var(open_file)));
-	sset(module_extra->source, source_buf);
+	if (module_meta->source != NULL) {
+		sfree(module_meta->source);
+	}
+	module_meta->source = source;
 
 	BLOG_INFO("Loaded %s %s", type_name, name);
 
@@ -157,12 +258,21 @@ bco_static(load_module, module_type_t type) {
 }
 
 static void
-cleanup_module_map(CK_MAP(module_extra_t)* module_map) {
+cleanup_module_map(CK_MAP(module_meta_t*)* module_map) {
 	for (int i = 0; i < map_size(*module_map); ++i) {
-		sfree((*module_map)[i].path);
-		sfree((*module_map)[i].source);
+		sfree((*module_map)[i]->source);
+		bgame_free((*module_map)[i], scene_allocator);
 	}
 	map_free(*module_map);
+}
+
+static void
+after_reload(void) {
+#ifndef __EMSCRIPTEN__
+	reinit_watch(emitters);
+	reinit_watch(affectors);
+	reinit_watch(renderers);
+#endif
 }
 
 static void
@@ -175,11 +285,18 @@ init(void) {
 		show_renderer = true;
 
 		grain = grain_create();
+
+#ifndef __EMSCRIPTEN__
+		bresmon = bresmon_create(scene_allocator);
+#endif
 	}
 }
 
 static void
 cleanup(void) {
+#ifndef __EMSCRIPTEN__
+	bresmon_destroy(bresmon);
+#endif
 	grain_destroy(grain);
 
 	cleanup_module_map(&emitters);
@@ -265,6 +382,10 @@ update(void) {
 		ImGui_EndPopup();
 	}
 
+#ifndef __EMSCRIPTEN__
+	bresmon_check(bresmon, false);
+#endif
+
 	cf_app_draw_onto_screen(true);
 }
 
@@ -272,4 +393,12 @@ SCENE {
 	.init = init,
 	.update = update,
 	.cleanup = cleanup,
+
+	.after_reload = after_reload,
 };
+
+#ifndef __EMSCRIPTEN__
+#	define BRESMON_IMPLEMENTATION
+#	define BRESMON_REALLOC bgame_realloc
+#	include <bresmon.h>
+#endif
