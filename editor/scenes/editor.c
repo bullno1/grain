@@ -388,6 +388,26 @@ update(void) {
 		ImGui_EndPopup();
 	}
 
+	if (should_popup_error) {
+		ImGui_OpenPopup("Error", 0);
+		should_popup_error = false;
+	}
+
+	if (ImGui_BeginPopupModal(
+			"Error",
+			NULL,
+			ImGuiWindowFlags_NoDecoration
+			| ImGuiWindowFlags_AlwaysAutoResize
+			| ImGuiWindowFlags_NoMove
+	)) {
+		ImGui_Text("%s", popup_error);
+		if (ImGui_Button("OK")) {
+			ImGui_CloseCurrentPopup();
+		}
+
+		ImGui_EndPopup();
+	}
+
 #ifndef __EMSCRIPTEN__
 	bresmon_check(bresmon, false);
 #endif
