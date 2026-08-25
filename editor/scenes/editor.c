@@ -375,7 +375,7 @@ show_module_params(
 					NULL,
 					ImGuiSliderFlags_AlwaysClamp
 				);
-			} else if (has_min || has_max) {
+			} else {
 				updated = ImGui_DragScalarNEx(
 					param_info->name,
 					type,
@@ -385,18 +385,6 @@ show_module_params(
 					NULL,
 					ImGuiSliderFlags_AlwaysClamp
 				);
-			} else {
-				updated = ImGui_InputScalarNEx(
-					param_info->name,
-					type,
-					param_addr, num_components,
-					type == ImGuiDataType_Float ? (void*)&step : (void*)&(int){ (int)step },
-					NULL,
-					NULL,
-					0
-				);
-				if (param_info->name == sintern("color")) {
-				}
 			}
 		}
 
