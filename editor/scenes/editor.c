@@ -44,9 +44,15 @@ SCENE_VAR(bool, show_emitters)
 SCENE_VAR(bool, show_affectors)
 SCENE_VAR(bool, show_renderer)
 SCENE_VAR(char*, source_buf)
+
 SCENE_VAR(CK_MAP(module_meta_t*), emitters)
+SCENE_VAR(char*, last_emitter_path)
+
 SCENE_VAR(CK_MAP(module_meta_t*), affectors)
+SCENE_VAR(char*, last_affector_path)
+
 SCENE_VAR(CK_MAP(module_meta_t*), renderers)
+SCENE_VAR(char*, last_renderer_path)
 
 #ifndef __EMSCRIPTEN__
 SCENE_VAR(bresmon_t*, bresmon)
@@ -80,6 +86,9 @@ load_module_from_file(
 	const char* name = NULL;
 	CK_MAP(module_meta_t*)* module_map = NULL;
 	void* module = NULL;
+	const char* path = ufa_get_open_file_name(open_file);
+	char** last_path = NULL;
+
 	switch (module_type) {
 		case GRAIN_MODULE_EMITTER: {
 			grain_emitter_t* emitter = grain_define_emitter(grain, source_buf);
@@ -87,6 +96,7 @@ load_module_from_file(
 			name = grain_get_emitter_name(emitter);
 			module_map = &emitters;
 			module = emitter;
+			last_path = &last_emitter_path;
 		} break;
 		case GRAIN_MODULE_AFFECTOR: {
 			grain_affector_t* affector = grain_define_affector(grain, source_buf);
@@ -94,6 +104,7 @@ load_module_from_file(
 			name = grain_get_affector_name(affector);
 			module_map = &emitters;
 			module = affector;
+			last_path = &last_affector_path;
 		} break;
 		case GRAIN_MODULE_RENDERER: {
 			grain_renderer_t* renderer = grain_define_renderer(grain, source_buf);
@@ -101,12 +112,23 @@ load_module_from_file(
 			name = grain_get_renderer_name(renderer);
 			module_map = &renderers;
 			module = renderer;
+			last_path = &last_renderer_path;
 		} break;
 	}
 
 	if (module != NULL) {
 		*module_out = module;
 		sset(*source_out, source_buf);
+
+		int slash_index;
+		for (slash_index = (int)strlen(path); slash_index >= 0; --slash_index) {
+			if (path[slash_index] == '/' || path[slash_index] == '\\') { break; }
+		}
+		if (slash_index > 0) {
+			sclear(*last_path);
+			sappend_range(*last_path, path, path + slash_index);
+		}
+
 		return true;
 	} else {
 		return false;
@@ -122,12 +144,12 @@ reload_module(const char* path, void* userdata) {
 	barena_t arena;
 	barena_init(&arena, bgame_arena_pool);
 
-	ufa_open_file_t* file = ufa_begin_reopen_file(
+	ufa_open_file_t* file = ufa_begin_open_file(
 		(ufa_config_t){
 			.arena = &arena,
-			.memalign = barena_memalign
-		},
-		path
+			.memalign = barena_memalign,
+			.filename = path,
+		}
 	);
 
 	if (load_module_from_file(file, module_meta->type, &module_meta->module, &module_meta->source)) {
@@ -184,6 +206,19 @@ bco_static(load_module, module_type_t type) {
 	bco_begin
 	begin_native_modal();
 
+	char* last_path;
+	switch (bco_arg(type)) {
+		case GRAIN_MODULE_EMITTER: {
+			last_path = last_emitter_path;
+		} break;
+		case GRAIN_MODULE_AFFECTOR: {
+			last_path = last_affector_path;
+		} break;
+		case GRAIN_MODULE_RENDERER: {
+			last_path = last_renderer_path;
+		} break;
+	}
+
 	barena_init(&bco_var(arena), bgame_arena_pool);
 	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
 		.arena = &bco_var(arena),
@@ -194,6 +229,7 @@ bco_static(load_module, module_type_t type) {
 			{ .name = "All files", .pattern = "*" },
 		},
 		.num_filters = 2,
+		.directory = last_path,
 	});
 
 	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
@@ -303,6 +339,9 @@ cleanup(void) {
 	cleanup_module_map(&affectors);
 	cleanup_module_map(&renderers);
 	sfree(source_buf);
+	sfree(last_emitter_path);
+	sfree(last_affector_path);
+	sfree(last_renderer_path);
 }
 
 static void

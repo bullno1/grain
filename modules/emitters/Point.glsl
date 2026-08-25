@@ -18,4 +18,4 @@ void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	float speed = mix(params.min_speed, params.max_speed, rand());
 	float angle = mix(params.min_angle, params.max_angle, rand());
 	particle.velocity = vec2(cos(angle), sin(angle)) * speed;
-}"
+}
