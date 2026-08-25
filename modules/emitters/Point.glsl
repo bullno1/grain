@@ -7,6 +7,8 @@ Requires(
 
 Params(
 	vec2 position;
+
+	@range(min=0, step=0.1)
 	float min_speed;
 	float max_speed;
 	float min_angle;

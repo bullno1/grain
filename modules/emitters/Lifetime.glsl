@@ -5,6 +5,7 @@ Requires(
 )
 
 Params(
+	@range(min=0, step=0.1)
 	float min_lifetime;
 	float max_lifetime;
 )

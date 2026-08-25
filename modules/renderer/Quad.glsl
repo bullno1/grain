@@ -6,8 +6,10 @@ Requires(
 )
 
 Params(
+	@range(step=0.1)
 	vec2 size;
-	@color uint color;
+	@color
+	uint color;
 )
 
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX

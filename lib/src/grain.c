@@ -1135,7 +1135,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		grain_module_t* module = (grain_module_t*)spec.emitters[i];
 		grain_module_info_t module_info = {
 			.name = module->info->name,
-			.first_params = asize(archetype->params),
+			.first_param = asize(archetype->params),
 			.num_params = asize(module->info->module_params),
 		};
 		apush(archetype->emitters, module_info);
@@ -1162,7 +1162,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		grain_module_t* module = (grain_module_t*)spec.affectors[i];
 		grain_module_info_t module_info = {
 			.name = module->info->name,
-			.first_params = asize(archetype->params),
+			.first_param = asize(archetype->params),
 			.num_params = asize(module->info->module_params),
 		};
 		apush(archetype->affectors, module_info);
@@ -1189,7 +1189,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	offset = 0;
 	archetype->renderer = (grain_module_info_t){
 		.name = render_module->info->name,
-		.first_params = asize(archetype->params),
+		.first_param = asize(archetype->params),
 		.num_params = asize(render_module->info->module_params),
 	};
 	for (int j = 0; j < asize(render_module->info->module_params); ++j) {
@@ -1272,6 +1272,7 @@ static void
 grain_init_ssbo(grain_ssbo_t* ssbo, int size) {
 	ssbo->gpu = cf_make_storage_buffer(cf_storage_buffer_defaults(size));
 	ssbo->cpu = cf_alloc(size);
+	memset(ssbo->cpu, 0, size);
 	ssbo->dirty = false;
 }
 
@@ -1303,15 +1304,15 @@ grain_capture_layout_from_modules(
 	grain_module_info_t* modules,
 	int num_modules
 ) {
-	for (int module_index = 0; module_index < asize(modules); ++module_index) {
+	for (int module_index = 0; module_index < num_modules; ++module_index) {
 		grain_module_info_t* module = &modules[module_index];
 		for (int param_index = 0; param_index < module->num_params; ++param_index) {
-			grain_param_info_t param = archetype->params[module->first_params + param_index];
+			grain_param_info_t param = archetype->params[module->first_param + param_index];
 			apush(layout->slots, ((grain_param_slot_t){
 				.module_name = module->name,
 				.name = param.name,
 				.type = param.type,
-				.offset = archetype->params_offsets[module->first_params + param_index],
+				.offset = archetype->params_offsets[module->first_param + param_index],
 				.size = grain_type_size((CSPV_DataType)param.type),
 			}));
 		}
@@ -1339,6 +1340,7 @@ grain_migrate_ssbo(
 ) {
 	char* old_cpu = ssbo->cpu;
 	char* new_cpu = cf_alloc(new_layout->stride * max_systems);
+	memset(new_cpu, 0, new_layout->stride * max_systems);
 
 	for (int new_slot_index = 0; new_slot_index < asize(new_layout->slots); ++new_slot_index) {
 		const grain_param_slot_t* dst = &new_layout->slots[new_slot_index];
@@ -1620,9 +1622,9 @@ grain_find_param(
 ) {
 	const char* interned_name = sintern(name);
 	for (int i = 0; i < module->num_params; ++i) {
-		grain_param_info_t param_info = archetype->params[module->first_params + i];
+		grain_param_info_t param_info = archetype->params[module->first_param + i];
 		if (param_info.name == interned_name) {
-			*offset = archetype->params_offsets[module->first_params + i];
+			*offset = archetype->params_offsets[module->first_param + i];
 			*size = grain_type_size((CSPV_DataType)param_info.type);
 			return true;
 		}
@@ -1639,7 +1641,7 @@ grain_resolve_param(grain_system_t* system, int param_index, void** value) {
 
 	grain_reconcile_pool(pool);
 
-	bool render = param_index >= archetype->renderer.first_params;
+	bool render = param_index >= archetype->renderer.first_param;
 	grain_ssbo_t* ssbo = render ? &pool->render_ssbo : &pool->update_ssbo;
 	if (value != NULL) {
 		int stride = render ? archetype->render_size : archetype->update_size;

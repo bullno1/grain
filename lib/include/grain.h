@@ -81,7 +81,7 @@ typedef struct {
 
 typedef struct {
 	const char* name;
-	int first_params;
+	int first_param;
 	int num_params;
 } grain_module_info_t;
 
@@ -215,7 +215,7 @@ grain_set_renderer_parameter(
  * or they may never reach the GPU.
  *
  * @param system The particle system.
- * @param param_index Index into grain_archetype_info_t::params (grain_module_info_t::first_params + i).
+ * @param param_index Index into grain_archetype_info_t::params (grain_module_info_t::first_param + i).
  * @return Pointer to the parameter, or NULL if param_index is out of range.
  */
 void*

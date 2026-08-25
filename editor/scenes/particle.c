@@ -172,7 +172,7 @@ init(void) {
 				? &info.affectors[i]
 				: &info.renderer;
 			for (int j = 0; j < module->num_params; ++j) {
-				const grain_param_info_t* param = &info.params[module->first_params + j];
+				const grain_param_info_t* param = &info.params[module->first_param + j];
 				for (int k = 0; k < param->num_decorators; ++k) {
 					BLOG_INFO(
 						"%s.%s: @%s (%d args)",
@@ -184,7 +184,7 @@ init(void) {
 		}
 
 		// Mixed positional/named lookup: @range(0, max=100)
-		const grain_param_info_t* gravity = &info.params[info.affectors[1].first_params];
+		const grain_param_info_t* gravity = &info.params[info.affectors[1].first_param];
 		const grain_param_decorator_t* range = grain_find_decorator(gravity, "range");
 		grain_decorator_arg_t arg;
 		float min = grain_find_decorator_arg(range, 0, "min", &arg) ? arg.value.number : -1.f;
