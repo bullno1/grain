@@ -11,6 +11,8 @@
 #include <barray.h>
 #include <limits.h>
 #include <float.h>
+#include <math.h>
+#include <stdio.h>
 
 #ifndef __EMSCRIPTEN__
 #	define BRESMON_API static
@@ -30,11 +32,16 @@
 typedef struct {
 	grain_module_ref_t ref;
 	char* source;
+	char* path;
 
 #ifndef __EMSCRIPTEN__
 	bresmon_watch_t* watch;
 #endif
 } module_meta_t;
+
+typedef struct {
+	char data[128];
+} system_name_t;
 
 typedef struct {
 	int offset;
@@ -53,6 +60,8 @@ SCENE_VAR(barray(log_entry_t), log_lines)
 SCENE_VAR(char*, tmp_source_buf)
 
 SCENE_VAR(char*, last_module_path)
+SCENE_VAR(char*, last_system_path)
+SCENE_VAR(system_name_t, system_name)
 
 SCENE_VAR(CK_MAP(module_meta_t*), emitters)
 SCENE_VAR(CK_MAP(module_meta_t*), affectors)
@@ -449,6 +458,18 @@ show_error(const char* error) {
 	should_popup_error = true;
 }
 
+static void
+remember_directory(char** dir_var, const char* file_path) {
+	int slash_index;
+	for (slash_index = (int)strlen(file_path); slash_index >= 0; --slash_index) {
+		if (file_path[slash_index] == '/' || file_path[slash_index] == '\\') { break; }
+	}
+	if (slash_index > 0) {
+		sclear(*dir_var);
+		sappend_range(*dir_var, file_path, file_path + slash_index);
+	}
+}
+
 bco_static(import_module) {
 	bco_vars(
 		barena_t arena;
@@ -526,17 +547,292 @@ bco_static(import_module) {
 #endif
 	}
 	sset(module_meta->source, source);
+	sset(module_meta->path, module_path);
 
-	int slash_index;
-	for (slash_index = (int)strlen(module_path); slash_index >= 0; --slash_index) {
-		if (module_path[slash_index] == '/' || module_path[slash_index] == '\\') { break; }
-	}
-	if (slash_index > 0) {
-		sclear(last_module_path);
-		sappend_range(last_module_path, module_path, module_path + slash_index);
-	}
+	remember_directory(&last_module_path, module_path);
 
 	BLOG_INFO("Loaded %s %s", type_name, module_path);
+
+	bco_end
+
+	ufa_end_open_file(bco_var(open_file));
+	barena_reset(&bco_var(arena));
+	end_native_modal();
+}
+
+static CK_MAP(module_meta_t*)*
+module_map_for_kind(grain_module_kind_t kind) {
+	switch (kind) {
+		case GRAIN_MODULE_EMITTER: return &emitters;
+		case GRAIN_MODULE_AFFECTOR: return &affectors;
+		case GRAIN_MODULE_RENDERER: return &renderers;
+		default: return NULL;
+	}
+}
+
+static const char*
+save_module_path(void* userdata, grain_module_kind_t kind, const char* module_name) {
+	(void)userdata;
+	CK_MAP(module_meta_t*)* module_map = module_map_for_kind(kind);
+	if (module_map == NULL) { return NULL; }
+
+	module_meta_t* module_meta = map_get(*module_map, sintern(module_name));
+	return module_meta != NULL ? module_meta->path : NULL;
+}
+
+bco_static(save_system) {
+	bco_vars(
+		barena_t arena;
+		ufa_save_file_t* save_file;
+	)
+
+	bco_begin
+	begin_native_modal();
+
+	barena_init(&bco_var(arena), bgame_arena_pool);
+	bco_var(save_file) = ufa_begin_save_file((ufa_config_t){
+		.arena = &bco_var(arena),
+		.memalign = barena_memalign,
+		.parent_window = cf_app_get_window(),
+		.filters = (ufa_filter_t[]){
+			{ .name = "grain system", .pattern = "json" },
+			{ .name = "All files", .pattern = "*" },
+		},
+		.num_filters = 2,
+		.directory = last_system_path,
+	});
+
+	while (ufa_check_save_file(bco_var(save_file)) == UFA_PENDING) {
+		bco_yield();
+	}
+
+	ufa_status_t status = ufa_check_save_file(bco_var(save_file));
+	if (status != UFA_OK) {
+		if (status != UFA_CANCELLED) {
+			show_error(ufa_get_save_file_error(bco_var(save_file)));
+		}
+		bco_return();
+	}
+
+	CF_JDoc doc = cf_make_json(NULL, 0);
+	CF_JVal jsystem = grain_save_system(
+		grain,
+		particle_system,
+		(grain_save_opts_t){
+			.name = system_name.data[0] != '\0' ? system_name.data : NULL,
+			.emission_rate = emission_rate,
+			.module_path = save_module_path,
+		},
+		doc
+	);
+	if (jsystem.id == 0) {
+		show_error(grain_get_last_error(grain));
+		cf_destroy_json(doc);
+		bco_return();
+	}
+	cf_json_set_root(doc, jsystem);
+
+	char* json_text = cf_json_to_string(doc);
+	const char* file_path = ufa_get_save_file_name(bco_var(save_file));
+
+	size_t total = (size_t)slen(json_text);
+	size_t written = 0;
+	bool write_ok = true;
+	while (written < total) {
+		size_t size = total - written;
+		if (ufa_write_save_file(bco_var(save_file), json_text + written, &size) != UFA_OK) {
+			show_error(ufa_get_save_file_error(bco_var(save_file)));
+			write_ok = false;
+			break;
+		}
+		written += size;
+	}
+
+	sfree(json_text);
+	cf_destroy_json(doc);
+
+	if (write_ok) {
+		remember_directory(&last_system_path, file_path);
+		BLOG_INFO("Saved system to %s", file_path);
+	}
+
+	bco_end
+
+	ufa_end_save_file(bco_var(save_file));
+	barena_reset(&bco_var(arena));
+	end_native_modal();
+}
+
+static void
+apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
+	// Modules first, so the archetype rebuild below sees fresh definitions
+	int num_modules = grain_blueprint_num_modules(blueprint);
+	for (int i = 0; i < num_modules; ++i) {
+		grain_blueprint_module_t bp_module = grain_blueprint_get_module(blueprint, i);
+		CK_MAP(module_meta_t*)* module_map = module_map_for_kind(bp_module.ref.kind);
+		if (module_map == NULL) { continue; }
+
+		module_meta_t* module_meta = map_get(*module_map, bp_module.name);
+		if (module_meta == NULL) {
+			module_meta = bgame_malloc(sizeof(module_meta_t), scene_allocator);
+			*module_meta = (module_meta_t){ 0 };
+			map_set(*module_map, bp_module.name, module_meta);
+		}
+		module_meta->ref = bp_module.ref;
+		sset(module_meta->source, bp_module.source);
+
+		if (bp_module.path != NULL) {
+			sset(module_meta->path, bp_module.path);
+#ifndef __EMSCRIPTEN__
+			// Safe even when the file is missing: bresmon degrades to a NULL
+			// watch on Linux and to a directory-level watch on Windows, which
+			// even picks the file up if it appears later.
+			watch_module(module_meta->path, module_meta);
+
+			FILE* file = fopen(bp_module.path, "rb");
+			if (file != NULL) {
+				fclose(file);
+				// Prefer the on-disk version over the embedded snapshot
+				reload_module(module_meta->path, module_meta);
+			} else {
+				BLOG_WARN("%s is missing; using the embedded source", bp_module.path);
+			}
+#endif
+		}
+	}
+
+	// Archetype composition
+	grain_archetype_info_t info = grain_inspect_archetype(
+		grain_blueprint_archetype(blueprint)
+	);
+	barray_clear(archetype_emitters);
+	for (int i = 0; i < info.num_emitters; ++i) {
+		module_meta_t* module_meta = map_get(emitters, info.emitters[i].name);
+		barray_push(archetype_emitters, module_meta->ref.module, scene_allocator);
+	}
+	barray_clear(archetype_affectors);
+	for (int i = 0; i < info.num_affectors; ++i) {
+		module_meta_t* module_meta = map_get(affectors, info.affectors[i].name);
+		barray_push(archetype_affectors, module_meta->ref.module, scene_allocator);
+	}
+	module_meta_t* renderer_meta = map_get(renderers, info.renderer.name);
+	archetype_renderer = renderer_meta->ref.module;
+	gui_renderer_index = -1;
+	for (int i = 0; i < map_size(renderers); ++i) {
+		if (renderers[i] == renderer_meta) {
+			gui_renderer_index = i;
+			break;
+		}
+	}
+
+	// The editor's own archetype, rebuilt with the loaded composition
+	grain_archetype_t* new_archetype = grain_define_archetype(
+		grain, "Editor",
+		(grain_archetype_spec_t){
+			.emitters = archetype_emitters,
+			.num_emitters = barray_len(archetype_emitters),
+
+			.affectors = archetype_affectors,
+			.num_affectors = barray_len(archetype_affectors),
+
+			.renderer = archetype_renderer,
+		}
+	);
+	if (new_archetype == NULL) {
+		BLOG_ERROR("Could not rebuild archetype: %s", grain_get_last_error(grain));
+		show_error(grain_get_last_error(grain));
+		return;
+	}
+	archetype = new_archetype;
+
+	// Pool with the loaded config
+	grain_pool_opts_t loaded_opts = grain_blueprint_pool_opts(blueprint);
+	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
+		.archetype = archetype,
+		.lifetime_budget = loaded_opts.lifetime_budget,
+		.max_emission_rate = loaded_opts.max_emission_rate,
+		.max_systems = 1,
+	});
+	if (new_pool == NULL) {
+		BLOG_ERROR("Could not recreate pool: %s", grain_get_last_error(grain));
+		show_error(grain_get_last_error(grain));
+		return;
+	}
+	grain_destroy_pool(pool);
+	pool = new_pool;
+	particle_system = grain_create_system(new_pool);
+
+	current_lifetime_budget = pending_lifetime_budget = loaded_opts.lifetime_budget;
+	current_max_emission_rate = pending_max_emission_rate = loaded_opts.max_emission_rate;
+
+	// Params and system state
+	grain_blueprint_apply(blueprint, particle_system);
+	emission_rate = grain_blueprint_emission_rate(blueprint);
+	snprintf(
+		system_name.data, sizeof(system_name.data),
+		"%s", grain_blueprint_name(blueprint)
+	);
+
+	BLOG_INFO(
+		"Loaded system `%s`: %d emitter(s), %d affector(s), renderer %s",
+		grain_blueprint_name(blueprint),
+		info.num_emitters, info.num_affectors, info.renderer.name
+	);
+}
+
+bco_static(open_system) {
+	bco_vars(
+		barena_t arena;
+		ufa_open_file_t* open_file;
+	)
+
+	bco_begin
+	begin_native_modal();
+
+	barena_init(&bco_var(arena), bgame_arena_pool);
+	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
+		.arena = &bco_var(arena),
+		.memalign = barena_memalign,
+		.parent_window = cf_app_get_window(),
+		.filters = (ufa_filter_t[]){
+			{ .name = "grain system", .pattern = "json" },
+			{ .name = "All files", .pattern = "*" },
+		},
+		.num_filters = 2,
+		.directory = last_system_path,
+	});
+
+	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
+		bco_yield();
+	}
+
+	const char* content = read_open_file(bco_var(open_file));
+	if (content == NULL) {
+		show_error(ufa_get_open_file_error(bco_var(open_file)));
+		bco_return();
+	}
+
+	const char* file_path = ufa_get_open_file_name(bco_var(open_file));
+
+	CF_JDoc doc = cf_make_json(content, (size_t)slen(content));
+	CF_JVal jroot = cf_json_get_root(doc);
+	grain_blueprint_t* blueprint = NULL;
+	if (jroot.id == 0) {
+		show_error("Not a valid JSON file");
+	} else {
+		blueprint = grain_load_blueprint(grain, jroot);
+		if (blueprint == NULL) {
+			const char* error = grain_get_last_error(grain);
+			show_error(error);
+			BLOG_ERROR("Error while loading %s: %s", file_path, error);
+		}
+	}
+	cf_destroy_json(doc);
+	if (blueprint == NULL) { bco_return(); }
+
+	remember_directory(&last_system_path, file_path);
+	apply_blueprint_to_editor(blueprint);
+	grain_destroy_blueprint(blueprint);
 
 	bco_end
 
@@ -549,6 +845,7 @@ static void
 cleanup_module_map(CK_MAP(module_meta_t*)* module_map) {
 	for (int i = 0; i < map_size(*module_map); ++i) {
 		sfree((*module_map)[i]->source);
+		sfree((*module_map)[i]->path);
 		bgame_free((*module_map)[i], scene_allocator);
 	}
 	map_free(*module_map);
@@ -583,6 +880,7 @@ init(void) {
 		emission_rate = 10.f;
 		current_lifetime_budget = pending_lifetime_budget = 16.f;
 		current_max_emission_rate = pending_max_emission_rate = 512.f;
+		snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
 		grain = grain_create();
 
@@ -658,6 +956,7 @@ cleanup(void) {
 	sfree(tmp_source_buf);
 	sfree(popup_error);
 	sfree(last_module_path);
+	sfree(last_system_path);
 }
 
 // The new pool is created before the old one is destroyed so that a rejected
@@ -719,6 +1018,16 @@ update(void) {
 				start_modal_action(import_module);
 			}
 
+			ImGui_Separator();
+
+			if (ImGui_MenuItem("Open system")) {
+				start_modal_action(open_system);
+			}
+
+			if (ImGui_MenuItem("Save system")) {
+				start_modal_action(save_system);
+			}
+
 			ImGui_EndMenu();
 		}
 
@@ -754,6 +1063,8 @@ update(void) {
 
 	if (show_system) {
 		if (ImGui_Begin("System", &show_system, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui_InputText("Name", system_name.data, sizeof(system_name.data), 0);
+
 			ImGui_DragFloatEx(
 				"Emission rate", &emission_rate,
 				1.f, 0.f, current_max_emission_rate, "%.1f/s",

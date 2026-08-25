@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <cute_graphics.h>
+#include <cute_json.h>
 
 typedef struct grain_s grain_t;
 typedef struct grain_emitter_s grain_emitter_t;
@@ -12,6 +13,7 @@ typedef struct grain_renderer_s grain_renderer_t;
 typedef struct grain_archetype_s grain_archetype_t;
 typedef struct grain_pool_s grain_pool_t;
 typedef struct grain_system_s grain_system_t;
+typedef struct grain_blueprint_s grain_blueprint_t;
 
 typedef enum {
 	GRAIN_MODULE_INVALID = 0,
@@ -161,6 +163,13 @@ grain_find_decorator_arg(
 grain_pool_t*
 grain_create_pool(grain_t* grain, grain_pool_opts_t opts);
 
+grain_pool_t*
+grain_get_pool(grain_system_t* system);
+
+//! The options this pool was created with
+grain_pool_opts_t
+grain_get_pool_opts(grain_pool_t* pool);
+
 void
 grain_destroy_pool(grain_pool_t* pool);
 
@@ -241,5 +250,92 @@ grain_render(grain_system_t* system);
 
 void
 grain_end_render(grain_t* grain);
+
+typedef struct {
+	//! Saved as the archetype name when the blueprint is loaded; defaults to "Effect"
+	const char* name;
+	float emission_rate;
+
+	/**
+	 * Optional source path lookup, for reopening in an editor.
+	 *
+	 * Called once per distinct module; return NULL to omit the path.
+	 * The library stores the path verbatim and never resolves it.
+	 */
+	const char* (*module_path)(void* userdata, grain_module_kind_t kind, const char* module_name);
+	void* userdata;
+} grain_save_opts_t;
+
+//! A module embedded in a blueprint
+typedef struct {
+	//! Only valid after grain_load_blueprint; the module is defined in its grain_t
+	grain_module_ref_t ref;
+	const char* name;
+	//! Embedded snapshot of the source, decorators intact
+	const char* source;
+	//! NULL if none was saved
+	const char* path;
+} grain_blueprint_module_t;
+
+/**
+ * Serialize a particle system into a JSON value inside the caller's document.
+ *
+ * The value is a closure: module sources, archetype composition, pool config
+ * and current param values.
+ * It is not attached to the document; use cf_json_set_root for a standalone
+ * file or nest it inside a bigger object.
+ *
+ * @return The blueprint object, or a zero CF_JVal on failure
+ *         (see @ref grain_get_last_error).
+ */
+CF_JVal
+grain_save_system(grain_t* grain, grain_system_t* system, grain_save_opts_t opts, CF_JDoc doc);
+
+/**
+ * Load a blueprint from a JSON value.
+ *
+ * All embedded modules are defined (redefinition follows the usual live-reload
+ * rules) along with the archetype, under its saved name.
+ * Everything the blueprint keeps is copied: the document can be destroyed as
+ * soon as this returns.
+ *
+ * @return NULL on failure (see @ref grain_get_last_error).
+ */
+grain_blueprint_t*
+grain_load_blueprint(grain_t* grain, CF_JVal val);
+
+//! Modules and the archetype it defined outlive the blueprint
+void
+grain_destroy_blueprint(grain_blueprint_t* blueprint);
+
+const char*
+grain_blueprint_name(grain_blueprint_t* blueprint);
+
+float
+grain_blueprint_emission_rate(grain_blueprint_t* blueprint);
+
+grain_archetype_t*
+grain_blueprint_archetype(grain_blueprint_t* blueprint);
+
+//! Saved pool config with `archetype` filled in; tweak max_systems before grain_create_pool
+grain_pool_opts_t
+grain_blueprint_pool_opts(grain_blueprint_t* blueprint);
+
+/**
+ * Write the saved param values and emission rate into a system.
+ *
+ * The system does not have to use the blueprint's archetype: modules are
+ * matched by name and params by name and component count, with values
+ * converted to the parameter's current type.
+ * Unmatched params keep whatever value the system already has.
+ */
+void
+grain_blueprint_apply(grain_blueprint_t* blueprint, grain_system_t* system);
+
+int
+grain_blueprint_num_modules(grain_blueprint_t* blueprint);
+
+grain_blueprint_module_t
+grain_blueprint_get_module(grain_blueprint_t* blueprint, int index);
 
 #endif

@@ -13,7 +13,10 @@
 
 typedef struct {
 	grain_dsl_module_info_t* info;
+	// The compiled copy: decorators are blanked out of it
 	char* source;
+	// The source as the author wrote it, decorators intact; what serialization embeds
+	char* original_source;
 } grain_module_t;
 
 struct grain_s {

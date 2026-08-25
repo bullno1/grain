@@ -32,6 +32,7 @@ test_grain_free_modules(CK_MAP(grain_module_t*)* module_store) {
 	for (int i = 0; i < map_size(*module_store); ++i) {
 		grain_module_t* module = (*module_store)[i];
 		cf_free(module->source);
+		cf_free(module->original_source);
 		grain_dsl_free_module_info(module->info);
 		cf_free(module);
 	}

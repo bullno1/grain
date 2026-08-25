@@ -110,6 +110,7 @@ grain_free_module(grain_module_t* module) {
 
 	grain_dsl_free_module_info(module->info);
 	cf_free((char*)module->source);
+	cf_free((char*)module->original_source);
 	cf_free(module);
 }
 
@@ -219,11 +220,13 @@ fail:
 }
 
 // Takes ownership of `module_info` and `source` (already stripped).
+// `original_source` is copied.
 static void*
 grain_store_module(
 	grain_t* grain,
 	grain_dsl_module_info_t* module_info,
-	char* source
+	char* source,
+	const char* original_source
 ) {
 	CK_MAP(grain_module_t*)* module_store = NULL;
 	switch (module_info->kind) {
@@ -240,8 +243,13 @@ grain_store_module(
 		map_set(*module_store, module_info->name, module);
 	} else {
 		cf_free(module->source);
+		cf_free(module->original_source);
 		grain_dsl_free_module_info(module->info);
 	}
+
+	size_t original_len = strlen(original_source);
+	module->original_source = cf_alloc(original_len + 1);
+	memcpy(module->original_source, original_source, original_len + 1);
 
 	module->source = source;
 	module->info = module_info;
@@ -284,7 +292,7 @@ grain_define_module_of_kind(
 		return NULL;
 	}
 
-	return grain_store_module(grain, module_info, stripped);
+	return grain_store_module(grain, module_info, stripped, source);
 }
 
 static void
@@ -645,7 +653,7 @@ grain_define_module(grain_t* grain, const char* source) {
 	if (module_info == NULL) { return (grain_module_ref_t){ 0 }; }
 
 	grain_module_ref_t ref = { .kind = module_info->kind };
-	ref.module = grain_store_module(grain, module_info, stripped);
+	ref.module = grain_store_module(grain, module_info, stripped, source);
 	return ref;
 }
 
@@ -1520,6 +1528,16 @@ grain_destroy_system(grain_system_t* system) {
 grain_archetype_t*
 grain_get_archetype(grain_system_t* system) {
 	return system->pool->opts.archetype;
+}
+
+grain_pool_t*
+grain_get_pool(grain_system_t* system) {
+	return system->pool;
+}
+
+grain_pool_opts_t
+grain_get_pool_opts(grain_pool_t* pool) {
+	return pool->opts;
 }
 
 static void

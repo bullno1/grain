@@ -9,6 +9,7 @@ set(SOURCES
 	"find.c"
 	"module.c"
 	"kind.c"
+	"blueprint.c"
 )
 
 add_executable(grain-tests "${SOURCES}")
