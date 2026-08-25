@@ -70,22 +70,22 @@ BTEST(kind, typed_define_rejects_wrong_kind) {
 BTEST(kind, generic_define_dispatches_on_declared_kind) {
 	grain_module_ref_t emitter_ref = grain_define_module(test_grain(), emitter_source);
 	BTEST_ASSERT_EX(emitter_ref.kind == GRAIN_MODULE_EMITTER, "%s", grain_get_last_error(test_grain()));
-	BTEST_EXPECT(grain_get_emitter_name(emitter_ref.emitter) == sintern("Point"));
+	BTEST_EXPECT(grain_get_emitter_name(emitter_ref.module) == sintern("Point"));
 
 	grain_module_ref_t affector_ref = grain_define_module(test_grain(), affector_source);
 	BTEST_ASSERT_EX(affector_ref.kind == GRAIN_MODULE_AFFECTOR, "%s", grain_get_last_error(test_grain()));
-	BTEST_EXPECT(grain_get_affector_name(affector_ref.affector) == sintern("Gravity"));
+	BTEST_EXPECT(grain_get_affector_name(affector_ref.module) == sintern("Gravity"));
 
 	grain_module_ref_t renderer_ref = grain_define_module(test_grain(), renderer_source);
 	BTEST_ASSERT_EX(renderer_ref.kind == GRAIN_MODULE_RENDERER, "%s", grain_get_last_error(test_grain()));
-	BTEST_EXPECT(grain_get_renderer_name(renderer_ref.renderer) == sintern("Quad"));
+	BTEST_EXPECT(grain_get_renderer_name(renderer_ref.module) == sintern("Quad"));
 
 	BTEST_EXPECT_EQUAL("%d", map_size(test_grain()->emitters), 1);
 	BTEST_EXPECT_EQUAL("%d", map_size(test_grain()->affectors), 1);
 	BTEST_EXPECT_EQUAL("%d", map_size(test_grain()->renderers), 1);
 
 	// Generic and typed define resolve to the same module slot
-	BTEST_EXPECT(grain_define_emitter(test_grain(), emitter_source) == emitter_ref.emitter);
+	BTEST_EXPECT(grain_define_emitter(test_grain(), emitter_source) == emitter_ref.module);
 }
 
 BTEST(kind, generic_define_reports_failure_as_invalid) {

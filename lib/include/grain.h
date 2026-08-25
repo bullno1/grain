@@ -28,11 +28,7 @@ typedef enum {
  */
 typedef struct {
 	grain_module_kind_t kind;
-	union {
-		grain_emitter_t* emitter;
-		grain_affector_t* affector;
-		grain_renderer_t* renderer;
-	};
+	void* module;
 } grain_module_ref_t;
 
 typedef struct {

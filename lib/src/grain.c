@@ -645,13 +645,7 @@ grain_define_module(grain_t* grain, const char* source) {
 	if (module_info == NULL) { return (grain_module_ref_t){ 0 }; }
 
 	grain_module_ref_t ref = { .kind = module_info->kind };
-	void* module = grain_store_module(grain, module_info, stripped);
-	switch (ref.kind) {
-		case GRAIN_MODULE_EMITTER: ref.emitter = module; break;
-		case GRAIN_MODULE_AFFECTOR: ref.affector = module; break;
-		case GRAIN_MODULE_RENDERER: ref.renderer = module; break;
-		case GRAIN_MODULE_INVALID: break;  // unreachable: parse would have failed
-	}
+	ref.module = grain_store_module(grain, module_info, stripped);
 	return ref;
 }
 

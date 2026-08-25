@@ -4,6 +4,7 @@
 #define BGAME_SCENE_NAME editor
 #include <bgame/utils.h>
 #include <bgame/allocator.h>
+#include <bgame/allocator/frame.h>
 #include <grain.h>
 #include <dcimgui.h>
 #include <bco.h>
@@ -24,8 +25,7 @@
 	} while (0)
 
 typedef struct {
-	grain_module_kind_t type;
-	void* module;
+	grain_module_ref_t ref;
 	char* source;
 
 #ifndef __EMSCRIPTEN__
@@ -37,16 +37,15 @@ SCENE_VAR(grain_t*, grain)
 SCENE_VAR(bool, show_emitters)
 SCENE_VAR(bool, show_affectors)
 SCENE_VAR(bool, show_renderer)
-SCENE_VAR(char*, source_buf)
+SCENE_VAR(char*, tmp_source_buf)
+
+SCENE_VAR(char*, last_module_path)
 
 SCENE_VAR(CK_MAP(module_meta_t*), emitters)
-SCENE_VAR(char*, last_emitter_path)
-
 SCENE_VAR(CK_MAP(module_meta_t*), affectors)
-SCENE_VAR(char*, last_affector_path)
-
 SCENE_VAR(CK_MAP(module_meta_t*), renderers)
-SCENE_VAR(char*, last_renderer_path)
+
+SCENE_VAR(char*, popup_error)
 
 #ifndef __EMSCRIPTEN__
 SCENE_VAR(bresmon_t*, bresmon)
@@ -57,63 +56,24 @@ static bco_t* modal_action = (bco_t*)modal_action_storage;
 static bool native_modal_guard = false;
 static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
-static const char* popup_error = NULL;
 
-static bool
-load_module_from_file(
-	ufa_open_file_t* open_file,
-	grain_module_kind_t module_type,
-	void** module_out,
-	char** source_out
-) {
+static bool should_popup_error = false;
+
+static const char*
+read_open_file(ufa_open_file_t* open_file) {
 	char read_buf[1024];
-	sclear(source_buf);
+	sclear(tmp_source_buf);
 	while (true) {
 		size_t size = sizeof(read_buf);
 		if (ufa_read_open_file(open_file, read_buf, &size) != UFA_OK) {
-			return false;
+			return NULL;
 		}
+
 		if (size == 0) { break; }
-		sappend_range(source_buf, read_buf, read_buf + size);
+		sappend_range(tmp_source_buf, read_buf, read_buf + size);
 	}
 
-	void* module = NULL;
-	const char* path = ufa_get_open_file_name(open_file);
-	char** last_path = NULL;
-
-	switch (module_type) {
-		case GRAIN_MODULE_EMITTER: {
-			module = grain_define_emitter(grain, source_buf);
-			last_path = &last_emitter_path;
-		} break;
-		case GRAIN_MODULE_AFFECTOR: {
-			module = grain_define_affector(grain, source_buf);
-			last_path = &last_affector_path;
-		} break;
-		case GRAIN_MODULE_RENDERER: {
-			module = grain_define_renderer(grain, source_buf);
-			last_path = &last_renderer_path;
-		} break;
-		default: return false;
-	}
-
-	if (module != NULL) {
-		*module_out = module;
-		sset(*source_out, source_buf);
-
-		int slash_index;
-		for (slash_index = (int)strlen(path); slash_index >= 0; --slash_index) {
-			if (path[slash_index] == '/' || path[slash_index] == '\\') { break; }
-		}
-		if (slash_index > 0) {
-			sclear(*last_path);
-			sappend_range(*last_path, path, path + slash_index);
-		}
-
-		return true;
-	} else {
-		return false;
-	}
+	return tmp_source_buf;
 }
 
 #ifndef __EMSCRIPTEN__
@@ -133,11 +93,38 @@ reload_module(const char* path, void* userdata) {
 		}
 	);
 
-	if (load_module_from_file(file, module_meta->type, &module_meta->module, &module_meta->source)) {
-		BLOG_INFO("Reloaded %s", path);
-	} else {
-		BLOG_ERROR("Error while reloading %s: %s", path, grain_get_last_error(grain));
+	if (ufa_check_open_file(file) != UFA_OK) {
+		BLOG_ERROR("Could not reopen %s", path);
+		goto end;
 	}
+
+	const char* source = read_open_file(file);
+	if (source == NULL) {
+		BLOG_ERROR("Error while reading %s: %s", path, ufa_get_open_file_error(file));
+		goto end;
+	}
+
+	void* new_module = NULL;
+	switch (module_meta->ref.kind) {
+		case GRAIN_MODULE_EMITTER:
+			new_module = grain_define_emitter(grain, source);
+			break;
+		case GRAIN_MODULE_AFFECTOR:
+			new_module = grain_define_affector(grain, source);
+			break;
+		case GRAIN_MODULE_RENDERER:
+			new_module = grain_define_renderer(grain, source);
+			break;
+		default:
+			break;
+	}
+	if (new_module == NULL) {
+		BLOG_ERROR("Error while reading %s: %s", path, grain_get_last_error(grain));
+		goto end;
+	}
+
+	sset(module_meta->source, source);
+	BLOG_INFO("Reloaded %s", path);
 
 end:
 	ufa_end_open_file(file);
@@ -175,10 +162,11 @@ end_native_modal(void) {
 
 static void
 show_error(const char* error) {
-	popup_error = error;
+	sset(popup_error, error);
+	should_popup_error = true;
 }
 
-bco_static(load_module, grain_module_kind_t type) {
+bco_static(import_module) {
 	bco_vars(
 		barena_t arena;
 		ufa_open_file_t* open_file;
@@ -186,20 +174,6 @@ bco_static(load_module, grain_module_kind_t type) {
 
 	bco_begin
 	begin_native_modal();
-
-	char* last_path = NULL;
-	switch (bco_arg(type)) {
-		case GRAIN_MODULE_EMITTER: {
-			last_path = last_emitter_path;
-		} break;
-		case GRAIN_MODULE_AFFECTOR: {
-			last_path = last_affector_path;
-		} break;
-		case GRAIN_MODULE_RENDERER: {
-			last_path = last_renderer_path;
-		} break;
-		default: break;
-	}
 
 	barena_init(&bco_var(arena), bgame_arena_pool);
 	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
@@ -211,63 +185,75 @@ bco_static(load_module, grain_module_kind_t type) {
 			{ .name = "All files", .pattern = "*" },
 		},
 		.num_filters = 2,
-		.directory = last_path,
+		.directory = last_module_path,
 	});
 
 	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
 		bco_yield();
 	}
 
-	void* module = NULL;
-	char* source = NULL;
-	if (!load_module_from_file(bco_var(open_file), bco_arg(type), &module, &source)) {
-		const char* error = grain_get_last_error(grain);
-		show_error(error);
-		BLOG_ERROR("Error while loading %s: %s", ufa_get_open_file_name(bco_var(open_file)), error);
+	const char* source = read_open_file(bco_var(open_file));
+	if (source == NULL) {
+		show_error(ufa_get_open_file_error(bco_var(open_file)));
 		bco_return();
 	}
 
-	const char* name = NULL;
+	const char* module_path = ufa_get_open_file_name(bco_var(open_file));
+
+	grain_module_ref_t module_ref = grain_define_module(grain, source);
+	if (module_ref.kind == GRAIN_MODULE_INVALID) {
+		const char* error = grain_get_last_error(grain);
+		show_error(error);
+		BLOG_ERROR("Error while loading %s: %s", module_path, error);
+		bco_return();
+	}
+
+	const char* module_name = NULL;
 	CK_MAP(module_meta_t*)* module_map = NULL;
 	const char* type_name = NULL;
-	switch (bco_arg(type)) {
+	switch (module_ref.kind) {
 		case GRAIN_MODULE_EMITTER: {
-			name = grain_get_emitter_name(module);
+			module_name = grain_get_emitter_name(module_ref.module);
 			module_map = &emitters;
 			type_name = "emitter";
 		} break;
 		case GRAIN_MODULE_AFFECTOR: {
-			name = grain_get_affector_name(module);
+			module_name = grain_get_affector_name(module_ref.module);
 			module_map = &affectors;
 			type_name = "affector";
 		} break;
 		case GRAIN_MODULE_RENDERER: {
-			name = grain_get_renderer_name(module);
+			module_name = grain_get_renderer_name(module_ref.module);
 			module_map = &renderers;
 			type_name = "renderer";
 		} break;
 		default: bco_return();
 	}
 
-	module_meta_t* module_meta = map_get(*module_map, name);
+	module_meta_t* module_meta = map_get(*module_map, module_name);
 	if (module_meta == NULL) {
 		module_meta = bgame_malloc(sizeof(module_meta_t), scene_allocator);
-		map_set(*module_map, name, module_meta);
+		map_set(*module_map, module_name, module_meta);
 		*module_meta = (module_meta_t){
-			.type = bco_arg(type),
-			.module = module,
+			.ref = module_ref,
 		};
 
 #ifndef __EMSCRIPTEN__
 		watch_module(ufa_get_open_file_name(bco_var(open_file)), module_meta);
 #endif
 	}
-	if (module_meta->source != NULL) {
-		sfree(module_meta->source);
-	}
-	module_meta->source = source;
+	sset(module_meta->source, source);
 
-	BLOG_INFO("Loaded %s %s", type_name, name);
+	int slash_index;
+	for (slash_index = (int)strlen(module_path); slash_index >= 0; --slash_index) {
+		if (module_path[slash_index] == '/' || module_path[slash_index] == '\\') { break; }
+	}
+	if (slash_index > 0) {
+		sclear(last_module_path);
+		sappend_range(last_module_path, module_path, module_path + slash_index);
+	}
+
+	BLOG_INFO("Loaded %s %s", type_name, module_path);
 
 	bco_end
 
@@ -321,10 +307,9 @@ cleanup(void) {
 	cleanup_module_map(&emitters);
 	cleanup_module_map(&affectors);
 	cleanup_module_map(&renderers);
-	sfree(source_buf);
-	sfree(last_emitter_path);
-	sfree(last_affector_path);
-	sfree(last_renderer_path);
+	sfree(tmp_source_buf);
+	sfree(popup_error);
+	sfree(last_module_path);
 }
 
 static void
@@ -335,6 +320,14 @@ update(void) {
 	ImGui_DockSpaceOverViewportEx(0, NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
 
 	if (ImGui_BeginMainMenuBar()) {
+		if (ImGui_BeginMenu("File")) {
+			if (ImGui_MenuItem("Import module")) {
+				start_modal_action(import_module);
+			}
+
+			ImGui_EndMenu();
+		}
+
 		if (ImGui_BeginMenu("View")) {
 			if (ImGui_MenuItemEx("Emitters", NULL, show_emitters, true)) {
 				show_emitters = !show_emitters;
@@ -355,27 +348,18 @@ update(void) {
 
 	if (show_emitters) {
 		if (ImGui_Begin("Emitters", &show_emitters, ImGuiWindowFlags_AlwaysAutoResize)) {
-			if (ImGui_Button("Load")) {
-				start_modal_action(load_module, GRAIN_MODULE_EMITTER);
-			}
 		}
 		ImGui_End();
 	}
 
 	if (show_affectors) {
 		if (ImGui_Begin("Affectors", &show_emitters, ImGuiWindowFlags_AlwaysAutoResize)) {
-			if (ImGui_Button("Load")) {
-				start_modal_action(load_module, GRAIN_MODULE_AFFECTOR);
-			}
 		}
 		ImGui_End();
 	}
 
 	if (show_renderer) {
 		if (ImGui_Begin("Renderer", &show_emitters, ImGuiWindowFlags_AlwaysAutoResize)) {
-			if (ImGui_Button("Load")) {
-				start_modal_action(load_module, GRAIN_MODULE_RENDERER);
-			}
 		}
 		ImGui_End();
 	}
