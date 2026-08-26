@@ -1443,6 +1443,10 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 		grain_set_last_error(grain, "max_emission_rate and lifetime_budget must be positive");
 		return NULL;
 	}
+	if (opts.max_burst_size < 0) {
+		grain_set_last_error(grain, "max_burst_size must not be negative");
+		return NULL;
+	}
 	if ((double)opts.lifetime_budget > GRAIN_MAX_LIFETIME_BUDGET) {
 		grain_set_last_error(grain, grain_sprintf(
 			grain, "lifetime_budget of %.1fs exceeds the %.1fs float precision budget",
@@ -1451,7 +1455,10 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 		return NULL;
 	}
 
-	int pool_size = (int)ceil((double)opts.max_emission_rate * (double)opts.lifetime_budget);
+	// Steady-state capacity plus headroom for one max-size burst: even a burst on top
+	// of a maxed-out stream never revisits a slot within lifetime_budget.
+	int pool_size = (int)ceil((double)opts.max_emission_rate * (double)opts.lifetime_budget)
+		+ opts.max_burst_size;
 	if (pool_size < 1) { pool_size = 1; }
 
 	grain_pool_t* pool = cf_alloc(sizeof(grain_pool_t));
@@ -1577,6 +1584,21 @@ grain_set_emission_rate(grain_system_t* system, float particles_per_second) {
 	if (particles_per_second < 0.f) { particles_per_second = 0.f; }
 
 	grain_set_clock_rate(&pool->clocks[index], particles_per_second);
+}
+
+void
+grain_burst(grain_system_t* system, int count) {
+	if (count <= 0) { return; }
+
+	grain_pool_t* pool = system->pool;
+	int index = system - pool->systems;
+
+	// The pool reserved max_burst_size slots of headroom; a larger accumulated burst
+	// would recycle live slots.
+	grain_queue_burst(
+		&pool->clocks[index], (double)count, (double)pool->opts.max_burst_size
+	);
+	grain_touch(pool);
 }
 
 static int

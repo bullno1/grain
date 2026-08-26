@@ -72,6 +72,8 @@ BTEST(blueprint, parse_valid) {
 	BTEST_EXPECT_EQUAL("%d", bp.max_systems, 4);
 	BTEST_EXPECT_EQUAL("%f", bp.max_emission_rate, 512.5f);
 	BTEST_EXPECT_EQUAL("%f", bp.lifetime_budget, 16.f);
+	// Absent in a pre-burst blueprint: defaults to 0 (bursts disabled)
+	BTEST_EXPECT_EQUAL("%d", bp.max_burst_size, 0);
 
 	BTEST_ASSERT_EQUAL("%d", asize(bp.modules), 3);
 	BTEST_EXPECT_EQUAL("%d", bp.modules[0].ref.kind, GRAIN_MODULE_EMITTER);
@@ -193,6 +195,7 @@ BTEST(blueprint, emit_parse_round_trip) {
 		.max_systems = 2,
 		.max_emission_rate = 100.f,
 		.lifetime_budget = 8.f,
+		.max_burst_size = 32,
 	};
 
 	apush(bp.modules, ((grain_blueprint_module_t){
@@ -248,6 +251,7 @@ BTEST(blueprint, emit_parse_round_trip) {
 	BTEST_EXPECT_EQUAL("%d", parsed.max_systems, bp.max_systems);
 	BTEST_EXPECT_EQUAL("%f", parsed.max_emission_rate, bp.max_emission_rate);
 	BTEST_EXPECT_EQUAL("%f", parsed.lifetime_budget, bp.lifetime_budget);
+	BTEST_EXPECT_EQUAL("%d", parsed.max_burst_size, bp.max_burst_size);
 
 	BTEST_ASSERT_EQUAL("%d", asize(parsed.modules), asize(bp.modules));
 	for (int i = 0; i < asize(bp.modules); ++i) {

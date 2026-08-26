@@ -86,12 +86,15 @@ SCENE_VAR(int, gui_renderer_index)
 
 SCENE_VAR(bool, show_system)
 SCENE_VAR(float, emission_rate)
+SCENE_VAR(int, burst_count)
 // The pool options in effect; grain_pool_t is opaque so the editor tracks them
 SCENE_VAR(float, current_lifetime_budget)
 SCENE_VAR(float, current_max_emission_rate)
+SCENE_VAR(int, current_max_burst_size)
 // Edited in the System window, applied only when the pool is recreated
 SCENE_VAR(float, pending_lifetime_budget)
 SCENE_VAR(float, pending_max_emission_rate)
+SCENE_VAR(int, pending_max_burst_size)
 
 static _Alignas(bco_align_t) char modal_action_storage[1024];
 static bco_t* modal_action = (bco_t*)modal_action_storage;
@@ -763,6 +766,7 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 		.archetype = archetype,
 		.lifetime_budget = loaded_opts.lifetime_budget,
 		.max_emission_rate = loaded_opts.max_emission_rate,
+		.max_burst_size = loaded_opts.max_burst_size,
 		.max_systems = 1,
 	});
 	if (new_pool == NULL) {
@@ -776,6 +780,7 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 
 	current_lifetime_budget = pending_lifetime_budget = loaded_opts.lifetime_budget;
 	current_max_emission_rate = pending_max_emission_rate = loaded_opts.max_emission_rate;
+	current_max_burst_size = pending_max_burst_size = loaded_opts.max_burst_size;
 
 	// Params and system state
 	grain_blueprint_apply(blueprint, particle_system);
@@ -894,8 +899,10 @@ init(void) {
 		gui_renderer_index = -1;
 
 		emission_rate = 10.f;
+		burst_count = 50;
 		current_lifetime_budget = pending_lifetime_budget = 16.f;
 		current_max_emission_rate = pending_max_emission_rate = 512.f;
+		current_max_burst_size = pending_max_burst_size = 256;
 		snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
 		grain = grain_create();
@@ -938,6 +945,7 @@ init(void) {
 			.archetype = archetype,
 			.lifetime_budget = current_lifetime_budget,
 			.max_emission_rate = current_max_emission_rate,
+			.max_burst_size = current_max_burst_size,
 			.max_systems = 1,
 		});
 
@@ -983,6 +991,7 @@ recreate_pool(grain_archetype_info_t* archetype_info) {
 		.archetype = archetype,
 		.lifetime_budget = pending_lifetime_budget,
 		.max_emission_rate = pending_max_emission_rate,
+		.max_burst_size = pending_max_burst_size,
 		.max_systems = 1,
 	});
 	if (new_pool == NULL) {
@@ -1012,10 +1021,11 @@ recreate_pool(grain_archetype_info_t* archetype_info) {
 
 	current_lifetime_budget = pending_lifetime_budget;
 	current_max_emission_rate = pending_max_emission_rate;
+	current_max_burst_size = pending_max_burst_size;
 
 	BLOG_INFO(
-		"Recreated pool: %.1f particles/s max, %.1fs lifetime budget",
-		current_max_emission_rate, current_lifetime_budget
+		"Recreated pool: %.1f particles/s max, %.1fs lifetime budget, %d max burst",
+		current_max_emission_rate, current_lifetime_budget, current_max_burst_size
 	);
 }
 
@@ -1087,6 +1097,21 @@ update(void) {
 				ImGuiSliderFlags_AlwaysClamp
 			);
 
+			ImGui_BeginDisabled(current_max_burst_size == 0);
+			ImGui_DragIntEx(
+				"Burst count", &burst_count,
+				1.f, 1, current_max_burst_size > 0 ? current_max_burst_size : 1, "%d",
+				ImGuiSliderFlags_AlwaysClamp
+			);
+			if (ImGui_Button("Burst")) {
+				grain_burst(particle_system, burst_count);
+			}
+			ImGui_EndDisabled();
+			if (current_max_burst_size == 0) {
+				ImGui_SameLine();
+				ImGui_TextDisabledUnformatted("Set a max burst size to enable");
+			}
+
 			ImGui_SeparatorText("Pool");
 			ImGui_DragFloatEx(
 				"Lifetime budget", &pending_lifetime_budget,
@@ -1098,14 +1123,21 @@ update(void) {
 				1.f, 1.f, FLT_MAX, "%.1f/s",
 				ImGuiSliderFlags_AlwaysClamp
 			);
+			ImGui_DragIntEx(
+				"Max burst size", &pending_max_burst_size,
+				1.f, 0, INT_MAX, "%d",
+				ImGuiSliderFlags_AlwaysClamp
+			);
 			ImGui_TextDisabled(
 				"Pool capacity: %d particles",
 				(int)ceilf(pending_max_emission_rate * pending_lifetime_budget)
+					+ pending_max_burst_size
 			);
 
 			bool pool_dirty =
 				pending_lifetime_budget != current_lifetime_budget
-				|| pending_max_emission_rate != current_max_emission_rate;
+				|| pending_max_emission_rate != current_max_emission_rate
+				|| pending_max_burst_size != current_max_burst_size;
 			ImGui_BeginDisabled(!pool_dirty);
 			if (ImGui_Button("Apply")) {
 				recreate_pool(&archetype_info);

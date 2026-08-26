@@ -25,6 +25,7 @@ typedef struct {
 	double   wrap_after;    // fold `elapsed` once it passes this (0 => disabled)
 	double   elapsed;       // double accumulator, never degrades
 	double   emitted;       // particles emitted so far, fractional
+	double   pending_burst; // burst particles queued since the last upload
 
 	// Snapshot taken at the last upload. The GPU's window is [synced, current), so
 	// several ticks between update passes fold into one window instead of the last
@@ -42,7 +43,9 @@ typedef struct {
 	float emit_base;    // emission counter at the last update pass, mod pool_size
 	float emit_count;   // particles to emit this pass: window is [base, base + count)
 	float wrap_shift;   // subtract from stored birth times once, then forget
-	float pad0, pad1, pad2;
+	float burst_base;   // counter position where the burst window starts, mod pool_size
+	float burst_count;  // burst particles this pass: window is [base, base + count)
+	float pad0;
 } grain_clock_entry_t;
 
 static inline void
@@ -51,6 +54,7 @@ grain_init_clock(grain_particle_clock_t* c, double lifetime_budget, double rate)
 	c->period         = lifetime_budget;
 	c->elapsed        = 0.0;
 	c->emitted        = 0.0;
+	c->pending_burst  = 0.0;
 	c->elapsed_synced = 0.0;
 	c->emitted_synced = 0.0;
 	c->wrap_pending   = 0.0;
@@ -84,23 +88,44 @@ grain_set_clock_rate(grain_particle_clock_t* c, double rate) {
 	c->rate = rate;
 }
 
+// Queue a burst: emitted all at one instant at the next snapshot, in counter
+// positions appended after the steady window. Accumulates across calls until the
+// snapshot collects it; the accumulated total saturates at `max_pending`.
+static inline void
+grain_queue_burst(grain_particle_clock_t* c, double count, double max_pending) {
+	c->pending_burst += count;
+	if (c->pending_burst > max_pending) { c->pending_burst = max_pending; }
+}
+
 // Produce the GPU entry for everything that happened since the last snapshot, then
 // mark it all as uploaded.
 static inline grain_clock_entry_t
 grain_snapshot_clock(grain_particle_clock_t* c, int pool_size) {
-	double count = c->emitted - c->emitted_synced;
+	double count_s = c->emitted - c->emitted_synced;
+	double count_b = c->pending_burst;
 	// More emissions than slots in one pass would need a slot to be born twice; the
 	// ring can only express one. Drop the excess rather than corrupt the ring.
-	if (count > (double)pool_size) { count = (double)pool_size; }
+	// The burst keeps its particles first: a thinned stream for one pathological
+	// frame is invisible, a shrunken explosion is not.
+	if (count_b > (double)pool_size)           { count_b = (double)pool_size; }
+	if (count_s > (double)pool_size - count_b) { count_s = (double)pool_size - count_b; }
 
 	grain_clock_entry_t e = {
-		.elapsed    = (float)c->elapsed,
-		.dt         = (float)(c->elapsed - c->elapsed_synced),
-		.emit_base  = (float)fmod(c->emitted_synced, (double)pool_size),
-		.emit_count = (float)count,
-		.wrap_shift = (float)c->wrap_pending,
+		.elapsed     = (float)c->elapsed,
+		.dt          = (float)(c->elapsed - c->elapsed_synced),
+		.emit_base   = (float)fmod(c->emitted_synced, (double)pool_size),
+		.emit_count  = (float)count_s,
+		.wrap_shift  = (float)c->wrap_pending,
+		// The burst window sits right after the steady one: bursts consume counter
+		// positions like any emission, so the ring discipline is undisturbed.
+		.burst_base  = (float)fmod(c->emitted, (double)pool_size),
+		.burst_count = (float)count_b,
 	};
 
+	// Advance by the full raw amount even when clamped: silent-drop parity with the
+	// steady path above.
+	c->emitted       += c->pending_burst;
+	c->pending_burst  = 0.0;
 	c->elapsed_synced = c->elapsed;
 	c->emitted_synced = c->emitted;
 	c->wrap_pending   = 0.0;

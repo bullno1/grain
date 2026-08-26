@@ -50,6 +50,7 @@ typedef struct {
 
 	float max_emission_rate;  // upper bound for particles/second
 	float lifetime_budget;    // max lifetime in seconds
+	int max_burst_size;       // upper bound for one burst's particle count; 0 disables bursts
 } grain_pool_opts_t;
 
 typedef enum {
@@ -190,6 +191,18 @@ grain_tick(grain_system_t* system, float dt_s);
 
 void
 grain_set_emission_rate(grain_system_t* system, float particles_per_second);
+
+/**
+ * Queue `count` particles to be emitted in one instant at the next update pass,
+ * alongside steady emission.
+ *
+ * Calls within a frame accumulate; the accumulated total is clamped to the
+ * pool's max_burst_size. Burst particles draw from the same slot ring as steady
+ * emission: keep the total burst count within any lifetime_budget window under
+ * max_burst_size, or the oldest particles may be recycled early.
+ */
+void
+grain_burst(grain_system_t* system, int count);
 
 void
 grain_set_emitter_parameter(

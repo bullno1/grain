@@ -30,6 +30,7 @@ struct grain_blueprint_s {
 	int max_systems;
 	float max_emission_rate;
 	float lifetime_budget;
+	int max_burst_size;
 
 	// source/path are cf_alloc copies owned by the blueprint; names are interned
 	CK_DYNA grain_blueprint_module_t* modules;

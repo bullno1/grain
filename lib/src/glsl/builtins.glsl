@@ -58,9 +58,9 @@ struct SystemClock {
     float emit_base;   // emission counter at the last update pass, mod pool_size
     float emit_count;  // particles to emit this pass: window is [base, base + count)
     float wrap_shift;  // subtract from stored birth times once (update pass only)
+    float burst_base;  // counter position where the burst window starts, mod pool_size
+    float burst_count; // burst particles this pass: window is [base, base + count)
     float grain_pad0;
-    float grain_pad1;
-    float grain_pad2;
 };
 
 // A particle's birth time is grain-internal state: it lives in a reserved lane of the
@@ -96,8 +96,9 @@ float rand() {
 // particles are untouched, so nothing pops in or out.
 //
 // Round-robin over the whole pool means a slot is revisited every pool_size / rate
-// seconds, and pool_size = ceil(max_rate * lifetime_budget) makes that at least the
-// budget at every permitted rate: a live particle is never recycled.
+// seconds, and pool_size = ceil(max_rate * lifetime_budget) + max_burst_size makes
+// that at least the budget at every permitted rate plus one max-size burst: a live
+// particle is never recycled.
 Schedule schedule(uint lid, uint pool_size, float birth, SystemClock clock) {
 	Schedule s;
 	s.birth = birth;
@@ -114,6 +115,21 @@ Schedule schedule(uint lid, uint pool_size, float birth, SystemClock clock) {
 			// across the frame instead of stacking them at its end.
 			float frac = (float(k) - base) / clock.emit_count;
 			s.birth = clock.elapsed - clock.dt + frac * clock.dt;
+			s.emit  = true;
+		}
+	}
+
+	// The burst window sits after the steady one in the counter. When the CPU-side
+	// clamp fired, the two can still land on the same slot; the burst wins, matching
+	// the clamp's priority, so no guard on s.emit here.
+	if (clock.burst_count > 0.0) {
+		float base = clock.burst_base;
+		uint k_lo = uint(ceil(base));
+		uint k = k_lo + (lid + pool_size - (k_lo % pool_size)) % pool_size;
+		if (float(k) < base + clock.burst_count) {
+			// A burst is one instant: every particle is born at the window's end and
+			// ages from zero starting next frame. No frac smear.
+			s.birth = clock.elapsed;
 			s.emit  = true;
 		}
 	}
@@ -141,10 +157,10 @@ SystemClock grain_unpack_SystemClock(uvec4 a, uvec4 b) {
 	clock.dt         = uintBitsToFloat(a.y);
 	clock.emit_base  = uintBitsToFloat(a.z);
 	clock.emit_count = uintBitsToFloat(a.w);
-	clock.wrap_shift = uintBitsToFloat(b.x);
-	clock.grain_pad0 = 0.0;
-	clock.grain_pad1 = 0.0;
-	clock.grain_pad2 = 0.0;
+	clock.wrap_shift  = uintBitsToFloat(b.x);
+	clock.burst_base  = uintBitsToFloat(b.y);
+	clock.burst_count = uintBitsToFloat(b.z);
+	clock.grain_pad0  = 0.0;
 	return clock;
 }
 

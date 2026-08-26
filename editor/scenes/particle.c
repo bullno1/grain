@@ -202,6 +202,7 @@ init(void) {
 			.max_systems = 16,
 			.max_emission_rate = 200.f,
 			.lifetime_budget = 20.f,  // must cover max_lifetime below
+			.max_burst_size = 200,
 		});
 		if (pool == NULL) {
 			BLOG_ERROR("%s", grain_get_last_error(grain));
@@ -243,6 +244,10 @@ update(void) {
 	grain_set_renderer_parameter(psystem, "size", &(CF_V2){ 3.f, 3.f });
 	CF_Pixel blue = cf_color_to_pixel(cf_color_blue());
 	grain_set_renderer_parameter(psystem, "color", &blue.val);
+
+	if (cf_key_just_pressed(CF_KEY_SPACE)) {
+		grain_burst(psystem, 200);
+	}
 
 	grain_tick(psystem, CF_DELTA_TIME);
 

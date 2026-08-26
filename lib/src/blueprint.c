@@ -338,6 +338,9 @@ grain_blueprint_parse(grain_t* grain, CF_JVal root, grain_blueprint_t* blueprint
 	double max_systems = 1.0;
 	grain_blueprint_get_number(jpool, "max_systems", &max_systems);
 	blueprint->max_systems = (int)max_systems;
+	double max_burst_size = 0.0;
+	grain_blueprint_get_number(jpool, "max_burst_size", &max_burst_size);
+	blueprint->max_burst_size = (int)max_burst_size;
 
 	CF_JVal jmodules = cf_json_get(root, "modules");
 	if (!grain_blueprint_jval_present(jmodules) || !cf_json_is_array(jmodules)) {
@@ -527,6 +530,7 @@ grain_blueprint_emit(const grain_blueprint_t* blueprint, CF_JDoc doc) {
 		doc, jpool, "lifetime_budget",
 		grain_blueprint_json_double(blueprint->lifetime_budget)
 	);
+	cf_json_object_add_int(doc, jpool, "max_burst_size", blueprint->max_burst_size);
 	cf_json_object_add(doc, root, "pool", jpool);
 
 	CF_JVal jmodules = cf_json_array(doc);
@@ -675,6 +679,7 @@ grain_save_system(
 		.max_systems = pool_opts.max_systems,
 		.max_emission_rate = pool_opts.max_emission_rate,
 		.lifetime_budget = pool_opts.lifetime_budget,
+		.max_burst_size = pool_opts.max_burst_size,
 	};
 
 	bool ok = true;
@@ -822,6 +827,7 @@ grain_blueprint_pool_opts(grain_blueprint_t* blueprint) {
 		.max_systems = blueprint->max_systems,
 		.max_emission_rate = blueprint->max_emission_rate,
 		.lifetime_budget = blueprint->lifetime_budget,
+		.max_burst_size = blueprint->max_burst_size,
 	};
 }
 
