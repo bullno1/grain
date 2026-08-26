@@ -1057,8 +1057,7 @@ bco_static(do_save_system, bool force_dialog) {
 		bco_return();
 	}
 
-	CF_JDoc doc = cf_make_json(NULL, 0);
-	CF_JVal jsystem = grain_save_system(
+	grain_blueprint_t* snapshot = grain_snapshot_system(
 		grain,
 		particle_system,
 		(grain_save_opts_t){
@@ -1066,17 +1065,21 @@ bco_static(do_save_system, bool force_dialog) {
 			.emission_rate = emission_rate,
 			.module_path = save_module_path,
 			.texture_path = save_texture_path,
-		},
-		doc
+		}
 	);
-	if (jsystem.id == 0) {
+	if (snapshot == NULL) {
 		show_error(grain_get_last_error(grain));
-		cf_destroy_json(doc);
 		bco_return();
 	}
-	cf_json_set_root(doc, jsystem);
 
+	// The document borrows the snapshot's strings: both only live until the
+	// JSON text has been printed
+	CF_JDoc doc = cf_make_json(NULL, 0);
+	cf_json_set_root(doc, grain_save_blueprint(snapshot, doc));
 	char* json_text = cf_json_to_string(doc);
+	cf_destroy_json(doc);
+	grain_destroy_blueprint(snapshot);
+
 	const char* file_path = ufa_get_save_file_name(bco_var(save_file));
 
 	size_t total = (size_t)slen(json_text);
@@ -1093,7 +1096,6 @@ bco_static(do_save_system, bool force_dialog) {
 	}
 
 	sfree(json_text);
-	cf_destroy_json(doc);
 
 	if (write_ok) {
 		ufa_file_ref_t* new_ref = ufa_ref_save_file(bco_var(save_file));

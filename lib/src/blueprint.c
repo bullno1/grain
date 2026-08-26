@@ -560,7 +560,7 @@ grain_blueprint_emit_slot(const grain_blueprint_slot_t* slot, CF_JDoc doc) {
 }
 
 CF_JVal
-grain_blueprint_emit(const grain_blueprint_t* blueprint, CF_JDoc doc) {
+grain_save_blueprint(grain_blueprint_t* blueprint, CF_JDoc doc) {
 	CF_JVal root = cf_json_object(doc);
 	cf_json_object_add_int(doc, root, "grain_version", GRAIN_BLUEPRINT_VERSION);
 	cf_json_object_add_string(doc, root, "name", blueprint->name);
@@ -732,68 +732,67 @@ grain_blueprint_collect_slot(
 	return slot;
 }
 
-CF_JVal
-grain_save_system(
+grain_blueprint_t*
+grain_snapshot_system(
 	grain_t* grain,
 	grain_system_t* system,
-	grain_save_opts_t opts,
-	CF_JDoc doc
+	grain_save_opts_t opts
 ) {
 	grain_archetype_t* archetype = grain_get_archetype(system);
 	grain_archetype_info_t info = grain_inspect_archetype(archetype);
 	grain_pool_opts_t pool_opts = grain_get_pool_opts(grain_get_pool(system));
 
-	grain_blueprint_t blueprint = {
-		.name = sintern(opts.name != NULL ? opts.name : "Effect"),
-		.emission_rate = opts.emission_rate,
-		.max_systems = pool_opts.max_systems,
-		.max_emission_rate = pool_opts.max_emission_rate,
-		.lifetime_budget = pool_opts.lifetime_budget,
-		.max_burst_size = pool_opts.max_burst_size,
-	};
+	grain_blueprint_t* blueprint = cf_alloc(sizeof(grain_blueprint_t));
+	memset(blueprint, 0, sizeof(*blueprint));
+	blueprint->name = sintern(opts.name != NULL ? opts.name : "Effect");
+	blueprint->emission_rate = opts.emission_rate;
+	blueprint->max_systems = pool_opts.max_systems;
+	blueprint->max_emission_rate = pool_opts.max_emission_rate;
+	blueprint->lifetime_budget = pool_opts.lifetime_budget;
+	blueprint->max_burst_size = pool_opts.max_burst_size;
+	blueprint->archetype = archetype;
 
 	bool ok = true;
 	for (int i = 0; ok && i < info.num_emitters; ++i) {
 		ok = grain_blueprint_collect_module(
-			grain, &blueprint, GRAIN_MODULE_EMITTER, info.emitters[i].name, opts
+			grain, blueprint, GRAIN_MODULE_EMITTER, info.emitters[i].name, opts
 		);
 	}
 	for (int i = 0; ok && i < info.num_affectors; ++i) {
 		ok = grain_blueprint_collect_module(
-			grain, &blueprint, GRAIN_MODULE_AFFECTOR, info.affectors[i].name, opts
+			grain, blueprint, GRAIN_MODULE_AFFECTOR, info.affectors[i].name, opts
 		);
 	}
 	ok = ok && grain_blueprint_collect_module(
-		grain, &blueprint, GRAIN_MODULE_RENDERER, info.renderer.name, opts
+		grain, blueprint, GRAIN_MODULE_RENDERER, info.renderer.name, opts
 	);
-
-	CF_JVal result = { 0 };
-	if (ok) {
-		for (int i = 0; i < info.num_emitters; ++i) {
-			apush(
-				blueprint.emitter_slots,
-				grain_blueprint_collect_slot(
-					system, &info, &info.emitters[i], GRAIN_MODULE_EMITTER, i, opts
-				)
-			);
-		}
-		for (int i = 0; i < info.num_affectors; ++i) {
-			apush(
-				blueprint.affector_slots,
-				grain_blueprint_collect_slot(
-					system, &info, &info.affectors[i], GRAIN_MODULE_AFFECTOR, i, opts
-				)
-			);
-		}
-		blueprint.renderer_slot = grain_blueprint_collect_slot(
-			system, &info, &info.renderer, GRAIN_MODULE_RENDERER, 0, opts
-		);
-
-		result = grain_blueprint_emit(&blueprint, doc);
+	if (!ok) {
+		grain_blueprint_cleanup(blueprint);
+		cf_free(blueprint);
+		return NULL;
 	}
 
-	grain_blueprint_cleanup(&blueprint);
-	return result;
+	for (int i = 0; i < info.num_emitters; ++i) {
+		apush(
+			blueprint->emitter_slots,
+			grain_blueprint_collect_slot(
+				system, &info, &info.emitters[i], GRAIN_MODULE_EMITTER, i, opts
+			)
+		);
+	}
+	for (int i = 0; i < info.num_affectors; ++i) {
+		apush(
+			blueprint->affector_slots,
+			grain_blueprint_collect_slot(
+				system, &info, &info.affectors[i], GRAIN_MODULE_AFFECTOR, i, opts
+			)
+		);
+	}
+	blueprint->renderer_slot = grain_blueprint_collect_slot(
+		system, &info, &info.renderer, GRAIN_MODULE_RENDERER, 0, opts
+	);
+
+	return blueprint;
 }
 
 grain_blueprint_t*

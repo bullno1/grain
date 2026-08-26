@@ -403,18 +403,29 @@ typedef struct {
 } grain_blueprint_module_t;
 
 /**
- * Serialize a particle system into a JSON value inside the caller's document.
+ * Snapshot a particle system into a blueprint: module sources, archetype
+ * composition, pool config and current param values.
  *
- * The value is a closure: module sources, archetype composition, pool config
- * and current param values.
- * It is not attached to the document; use cf_json_set_root for a standalone
- * file or nest it inside a bigger object.
+ * The inverse of @ref grain_blueprint_apply. The blueprint owns copies of
+ * everything it holds; destroy it with @ref grain_destroy_blueprint.
  *
- * @return The blueprint object, or a zero CF_JVal on failure
- *         (see @ref grain_get_last_error).
+ * @return NULL on failure (see @ref grain_get_last_error).
+ */
+grain_blueprint_t*
+grain_snapshot_system(grain_t* grain, grain_system_t* system, grain_save_opts_t opts);
+
+/**
+ * Serialize a blueprint into a JSON value inside the caller's document.
+ *
+ * The inverse of @ref grain_load_blueprint. The value is not attached to the
+ * document; use cf_json_set_root for a standalone file or nest it inside a
+ * bigger object.
+ *
+ * The document borrows the blueprint's strings without copying.
+ * Keep the blueprint alive until the document has been serialized or destroyed.
  */
 CF_JVal
-grain_save_system(grain_t* grain, grain_system_t* system, grain_save_opts_t opts, CF_JDoc doc);
+grain_save_blueprint(grain_blueprint_t* blueprint, CF_JDoc doc);
 
 /**
  * Load a blueprint from a JSON value.

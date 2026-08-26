@@ -285,7 +285,7 @@ BTEST(blueprint, emit_parse_round_trip) {
 
 	// Emit, print, re-read and re-parse: the full text round trip
 	CF_JDoc out_doc = cf_make_json(NULL, 0);
-	CF_JVal root = grain_blueprint_emit(&bp, out_doc);
+	CF_JVal root = grain_save_blueprint(&bp, out_doc);
 	BTEST_ASSERT(root.id != 0);
 	cf_json_set_root(out_doc, root);
 	char* json_text = cf_json_to_string(out_doc);
@@ -340,6 +340,72 @@ BTEST(blueprint, emit_parse_round_trip) {
 		strcmp(parsed.renderer_slot.textures[0].path, "sprites/fire.png") == 0
 	);
 	BTEST_EXPECT_EQUAL("%d", grain_blueprint_num_textures(&parsed), 2);
+
+	grain_blueprint_cleanup(&parsed);
+	grain_blueprint_cleanup(&bp);
+	sfree(json_text);
+	cf_destroy_json(in_doc);
+	cf_destroy_json(out_doc);
+}
+
+// The saved document borrows only from the blueprint: as long as the caller
+// keeps the blueprint alive, the document survives unrelated grain activity
+// (a module definition resets the transient arena) up until serialization.
+// The document stores string pointers without copying, so serializing garbage
+// here means emit leaked a reference into memory it does not own.
+BTEST(blueprint, saved_doc_borrows_only_from_blueprint) {
+	const char* source = "Renderer(Quad)\n@range(0)\nfloat scale;\n";
+	const char* path = "renderers/Quad.glsl";
+	const char* texture_path = "sprites/fire.png";
+
+	grain_blueprint_t bp = {
+		.name = sintern("Borrow"),
+		.max_systems = 1,
+		.max_emission_rate = 1.f,
+		.lifetime_budget = 1.f,
+	};
+	apush(bp.modules, ((grain_blueprint_module_t){
+		.ref = { .kind = GRAIN_MODULE_RENDERER },
+		.name = sintern("Quad"),
+		.source = test_strdup(source),
+		.path = test_strdup(path),
+	}));
+	bp.renderer_slot.module = sintern("Quad");
+	apush(bp.renderer_slot.textures, ((grain_blueprint_texture_t){
+		.sampler_name = sintern("image"),
+		.path = test_strdup(texture_path),
+	}));
+
+	CF_JDoc out_doc = cf_make_json(NULL, 0);
+	CF_JVal root = grain_save_blueprint(&bp, out_doc);
+	BTEST_ASSERT(root.id != 0);
+	cf_json_set_root(out_doc, root);
+
+	// Unrelated grain activity between save and serialization: a (failed)
+	// module definition resets the arena and writes an error message over it
+	grain_module_ref_t churn = grain_define_module(test_grain(), "not a module");
+	BTEST_ASSERT(churn.kind == GRAIN_MODULE_INVALID);
+
+	char* json_text = cf_json_to_string(out_doc);
+
+	grain_blueprint_t parsed = { 0 };
+	bool ok;
+	CF_JDoc in_doc = test_parse(json_text, &parsed, &ok);
+	BTEST_ASSERT_EX(ok, "%s", grain_get_last_error(test_grain()));
+	BTEST_ASSERT_EQUAL("%d", asize(parsed.modules), 1);
+	BTEST_EXPECT_EX(
+		strcmp(parsed.modules[0].source, source) == 0,
+		"source is \"%s\"", parsed.modules[0].source
+	);
+	BTEST_EXPECT_EX(
+		strcmp(parsed.modules[0].path, path) == 0,
+		"path is \"%s\"", parsed.modules[0].path
+	);
+	BTEST_ASSERT_EQUAL("%d", asize(parsed.renderer_slot.textures), 1);
+	BTEST_EXPECT_EX(
+		strcmp(parsed.renderer_slot.textures[0].path, texture_path) == 0,
+		"texture path is \"%s\"", parsed.renderer_slot.textures[0].path
+	);
 
 	grain_blueprint_cleanup(&parsed);
 	grain_blueprint_cleanup(&bp);

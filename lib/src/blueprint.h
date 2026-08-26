@@ -65,9 +65,8 @@ struct grain_blueprint_s {
 bool
 grain_blueprint_parse(grain_t* grain, CF_JVal val, grain_blueprint_t* blueprint);
 
-//! The pure inverse of grain_blueprint_parse: records to a JSON object in `doc`
-CF_JVal
-grain_blueprint_emit(const grain_blueprint_t* blueprint, CF_JDoc doc);
+// The inverse of grain_blueprint_parse is the public grain_save_blueprint:
+// pure record emission, works on any blueprint (parsed, snapshot or hand-built)
 
 //! Free everything a blueprint owns, tolerating partial state; not the struct itself
 void
