@@ -104,9 +104,18 @@ grain_blueprint_strdup(const char* str) {
 }
 
 static void
+grain_blueprint_free_slot_contents(grain_blueprint_slot_t* slot) {
+	afree(slot->params);
+	for (int i = 0; i < asize(slot->textures); ++i) {
+		cf_free(slot->textures[i].path);
+	}
+	afree(slot->textures);
+}
+
+static void
 grain_blueprint_free_slots(CK_DYNA grain_blueprint_slot_t** slots) {
 	for (int i = 0; i < asize(*slots); ++i) {
-		afree((*slots)[i].params);
+		grain_blueprint_free_slot_contents(&(*slots)[i]);
 	}
 	afree(*slots);
 	*slots = NULL;
@@ -122,7 +131,7 @@ grain_blueprint_cleanup(grain_blueprint_t* blueprint) {
 
 	grain_blueprint_free_slots(&blueprint->emitter_slots);
 	grain_blueprint_free_slots(&blueprint->affector_slots);
-	afree(blueprint->renderer_slot.params);
+	grain_blueprint_free_slot_contents(&blueprint->renderer_slot);
 
 	cf_free(blueprint->spec_emitters);
 	cf_free(blueprint->spec_affectors);
@@ -194,59 +203,89 @@ grain_blueprint_parse_slot(
 	out->module = sintern(module_name);
 
 	CF_JVal jparams = cf_json_get(jslot, "params");
-	if (!grain_blueprint_jval_present(jparams)) { return true; }
-	if (!cf_json_is_object(jparams)) {
+	if (grain_blueprint_jval_present(jparams)) {
+		if (!cf_json_is_object(jparams)) {
+			grain_set_last_error(grain, grain_sprintf(
+				grain, "`%s`: `params` must be an object", module_name
+			));
+			return false;
+		}
+
+		for (
+			CF_JIter itr = cf_json_iter(jparams);
+			itr.index < itr.count;
+			itr = cf_json_iter_next(itr)
+		) {
+			const char* param_name = cf_json_iter_key(itr);
+			CF_JVal jvalue = cf_json_iter_val(itr);
+
+			grain_blueprint_param_t param = {
+				.name = sintern(param_name),
+				.type = CF_SHADER_INFO_TYPE_UNKNOWN,
+			};
+
+			if (grain_blueprint_jval_is_number(jvalue)) {
+				param.num_components = 1;
+				param.components[0] = grain_blueprint_jval_to_double(jvalue);
+			} else if (cf_json_is_array(jvalue)) {
+				int len = cf_json_get_len(jvalue);
+				if (len < 1 || len > GRAIN_BLUEPRINT_MAX_COMPONENTS) {
+					grain_set_last_error(grain, grain_sprintf(
+						grain, "`%s.%s` has an invalid number of components: %d",
+						module_name, param_name, len
+					));
+					return false;
+				}
+				param.num_components = len;
+				for (int i = 0; i < len; ++i) {
+					CF_JVal element = cf_json_array_get(jvalue, i);
+					if (!grain_blueprint_jval_is_number(element)) {
+						grain_set_last_error(grain, grain_sprintf(
+							grain, "`%s.%s` must contain only numbers", module_name, param_name
+						));
+						return false;
+					}
+					param.components[i] = grain_blueprint_jval_to_double(element);
+				}
+			} else {
+				grain_set_last_error(grain, grain_sprintf(
+					grain, "`%s.%s` must be a number or an array of numbers",
+					module_name, param_name
+				));
+				return false;
+			}
+
+			apush(out->params, param);
+		}
+	}
+
+	// Optional on load so older blueprints keep parsing
+	CF_JVal jtextures = cf_json_get(jslot, "textures");
+	if (!grain_blueprint_jval_present(jtextures)) { return true; }
+	if (!cf_json_is_object(jtextures)) {
 		grain_set_last_error(grain, grain_sprintf(
-			grain, "`%s`: `params` must be an object", module_name
+			grain, "`%s`: `textures` must be an object", module_name
 		));
 		return false;
 	}
 
 	for (
-		CF_JIter itr = cf_json_iter(jparams);
+		CF_JIter itr = cf_json_iter(jtextures);
 		itr.index < itr.count;
 		itr = cf_json_iter_next(itr)
 	) {
-		const char* param_name = cf_json_iter_key(itr);
-		CF_JVal jvalue = cf_json_iter_val(itr);
-
-		grain_blueprint_param_t param = {
-			.name = sintern(param_name),
-			.type = CF_SHADER_INFO_TYPE_UNKNOWN,
-		};
-
-		if (grain_blueprint_jval_is_number(jvalue)) {
-			param.num_components = 1;
-			param.components[0] = grain_blueprint_jval_to_double(jvalue);
-		} else if (cf_json_is_array(jvalue)) {
-			int len = cf_json_get_len(jvalue);
-			if (len < 1 || len > GRAIN_BLUEPRINT_MAX_COMPONENTS) {
-				grain_set_last_error(grain, grain_sprintf(
-					grain, "`%s.%s` has an invalid number of components: %d",
-					module_name, param_name, len
-				));
-				return false;
-			}
-			param.num_components = len;
-			for (int i = 0; i < len; ++i) {
-				CF_JVal element = cf_json_array_get(jvalue, i);
-				if (!grain_blueprint_jval_is_number(element)) {
-					grain_set_last_error(grain, grain_sprintf(
-						grain, "`%s.%s` must contain only numbers", module_name, param_name
-					));
-					return false;
-				}
-				param.components[i] = grain_blueprint_jval_to_double(element);
-			}
-		} else {
+		const char* sampler_name = cf_json_iter_key(itr);
+		CF_JVal jpath = cf_json_iter_val(itr);
+		if (!cf_json_is_string(jpath)) {
 			grain_set_last_error(grain, grain_sprintf(
-				grain, "`%s.%s` must be a number or an array of numbers",
-				module_name, param_name
+				grain, "`%s.%s` must be a path string", module_name, sampler_name
 			));
 			return false;
 		}
-
-		apush(out->params, param);
+		apush(out->textures, ((grain_blueprint_texture_t){
+			.sampler_name = sintern(sampler_name),
+			.path = grain_blueprint_strdup(cf_json_get_string(jpath)),
+		}));
 	}
 
 	return true;
@@ -507,6 +546,16 @@ grain_blueprint_emit_slot(const grain_blueprint_slot_t* slot, CF_JDoc doc) {
 		cf_json_object_add(doc, jslot, "params", jparams);
 	}
 
+	if (asize(slot->textures) > 0) {
+		CF_JVal jtextures = cf_json_object(doc);
+		for (int i = 0; i < asize(slot->textures); ++i) {
+			cf_json_object_add_string(
+				doc, jtextures, slot->textures[i].sampler_name, slot->textures[i].path
+			);
+		}
+		cf_json_object_add(doc, jslot, "textures", jtextures);
+	}
+
 	return jslot;
 }
 
@@ -622,7 +671,10 @@ static grain_blueprint_slot_t
 grain_blueprint_collect_slot(
 	grain_system_t* system,
 	const grain_archetype_info_t* info,
-	const grain_module_info_t* module_info
+	const grain_module_info_t* module_info,
+	grain_module_kind_t kind,
+	int module_index,
+	grain_save_opts_t opts
 ) {
 	grain_blueprint_slot_t slot = { .module = module_info->name };
 
@@ -657,6 +709,24 @@ grain_blueprint_collect_slot(
 				break;
 		}
 		apush(slot.params, param);
+	}
+
+	// Texture bindings are saved as caller-provided paths: the library holds
+	// only GPU handles and never touches the filesystem
+	if (opts.texture_path != NULL) {
+		for (int i = 0; i < module_info->num_samplers; ++i) {
+			const grain_sampler_info_t* sampler_info =
+				&info->samplers[module_info->first_sampler + i];
+			const char* path = opts.texture_path(
+				opts.userdata, kind, module_index,
+				module_info->name, sampler_info->name
+			);
+			if (path == NULL) { continue; }
+			apush(slot.textures, ((grain_blueprint_texture_t){
+				.sampler_name = sampler_info->name,
+				.path = grain_blueprint_strdup(path),
+			}));
+		}
 	}
 
 	return slot;
@@ -702,17 +772,21 @@ grain_save_system(
 		for (int i = 0; i < info.num_emitters; ++i) {
 			apush(
 				blueprint.emitter_slots,
-				grain_blueprint_collect_slot(system, &info, &info.emitters[i])
+				grain_blueprint_collect_slot(
+					system, &info, &info.emitters[i], GRAIN_MODULE_EMITTER, i, opts
+				)
 			);
 		}
 		for (int i = 0; i < info.num_affectors; ++i) {
 			apush(
 				blueprint.affector_slots,
-				grain_blueprint_collect_slot(system, &info, &info.affectors[i])
+				grain_blueprint_collect_slot(
+					system, &info, &info.affectors[i], GRAIN_MODULE_AFFECTOR, i, opts
+				)
 			);
 		}
 		blueprint.renderer_slot = grain_blueprint_collect_slot(
-			system, &info, &info.renderer
+			system, &info, &info.renderer, GRAIN_MODULE_RENDERER, 0, opts
 		);
 
 		result = grain_blueprint_emit(&blueprint, doc);
@@ -834,6 +908,73 @@ grain_blueprint_pool_opts(grain_blueprint_t* blueprint) {
 int
 grain_blueprint_num_modules(grain_blueprint_t* blueprint) {
 	return asize(blueprint->modules);
+}
+
+// Visits slots in canonical order (emitters, affectors, renderer), counting
+// texture records down to the requested index; NULL slot_index means count all.
+static bool
+grain_blueprint_find_texture(
+	int* index,
+	grain_module_kind_t kind,
+	int module_index,
+	const grain_blueprint_slot_t* slot,
+	grain_blueprint_texture_info_t* out
+) {
+	if (*index >= asize(slot->textures)) {
+		*index -= asize(slot->textures);
+		return false;
+	}
+
+	const grain_blueprint_texture_t* texture = &slot->textures[*index];
+	*out = (grain_blueprint_texture_info_t){
+		.kind = kind,
+		.module_index = module_index,
+		.module_name = slot->module,
+		.sampler_name = texture->sampler_name,
+		.path = texture->path,
+	};
+	return true;
+}
+
+int
+grain_blueprint_num_textures(grain_blueprint_t* blueprint) {
+	int total = 0;
+	for (int i = 0; i < asize(blueprint->emitter_slots); ++i) {
+		total += asize(blueprint->emitter_slots[i].textures);
+	}
+	for (int i = 0; i < asize(blueprint->affector_slots); ++i) {
+		total += asize(blueprint->affector_slots[i].textures);
+	}
+	total += asize(blueprint->renderer_slot.textures);
+	return total;
+}
+
+grain_blueprint_texture_info_t
+grain_blueprint_get_texture(grain_blueprint_t* blueprint, int index) {
+	grain_blueprint_texture_info_t info = { 0 };
+	if (index < 0) { return info; }
+
+	for (int i = 0; i < asize(blueprint->emitter_slots); ++i) {
+		if (grain_blueprint_find_texture(
+			&index, GRAIN_MODULE_EMITTER, i,
+			&blueprint->emitter_slots[i], &info
+		)) {
+			return info;
+		}
+	}
+	for (int i = 0; i < asize(blueprint->affector_slots); ++i) {
+		if (grain_blueprint_find_texture(
+			&index, GRAIN_MODULE_AFFECTOR, i,
+			&blueprint->affector_slots[i], &info
+		)) {
+			return info;
+		}
+	}
+	grain_blueprint_find_texture(
+		&index, GRAIN_MODULE_RENDERER, 0,
+		&blueprint->renderer_slot, &info
+	);
+	return info;
 }
 
 grain_blueprint_module_t

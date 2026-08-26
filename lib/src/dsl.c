@@ -312,7 +312,38 @@ grain_dsl_free_bytecode(CF_ShaderBytecode bytecode) {
 }
 
 grain_dsl_module_info_t*
-grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
+grain_dsl_parse_module(
+	grain_t* grain,
+	const char* source,
+	CSPV_Stage stage,
+	CK_DYNA const char** samplers
+) {
+	// The module body references its samplers by their local names, so the
+	// inspect compile declares them up front. Bindings 8+ stay clear of the
+	// grain_Inspect_* dummy blocks; the uvrect global stands in for the slot's
+	// UV rect the archetype composition provides.
+	const char* prelude_fmt =
+		"layout(set = 0, binding = %d) uniform sampler2D %s;\n"
+		"vec4 %s_uvrect;\n";
+	const char* samplers_prelude = "";
+	if (asize(samplers) > 0) {
+		size_t prelude_size = 1;
+		for (int i = 0; i < asize(samplers); ++i) {
+			prelude_size += (size_t)snprintf(
+				NULL, 0, prelude_fmt, 8 + i, samplers[i], samplers[i]
+			);
+		}
+		char* prelude = cf_arena_alloc(&grain->arena, prelude_size);
+		size_t offset = 0;
+		for (int i = 0; i < asize(samplers); ++i) {
+			offset += (size_t)snprintf(
+				prelude + offset, prelude_size - offset,
+				prelude_fmt, 8 + i, samplers[i], samplers[i]
+			);
+		}
+		samplers_prelude = prelude;
+	}
+
 	grain_vfs_entry_t vfs[] = {
 		{
 			.name = "grain/api.glsl",
@@ -321,6 +352,10 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 		{
 			.name = "grain/internal.glsl",
 			.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_internal)),
+		},
+		{
+			.name = "grain/samplers.glsl",
+			.content = samplers_prelude,
 		},
 		{
 			.name = "module.glsl",
@@ -359,6 +394,26 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 	if (asize(reflection->inputs) != 0) {
 		grain_set_last_error(grain, "Particle module cannot declare input");
 		goto fail;
+	}
+
+	// Raw sampler declarations would collide with grain's managed bindings
+	for (int i = 0; i < asize(reflection->samplers); ++i) {
+		const char* sampler_name = reflection->samplers[i].name;
+		bool declared = false;
+		for (int j = 0; j < asize(samplers); ++j) {
+			if (samplers[j] == sampler_name) {
+				declared = true;
+				break;
+			}
+		}
+		if (!declared) {
+			grain_set_last_error(grain, grain_sprintf(
+				grain,
+				"Sampler `%s` must be declared in a `Samplers` block",
+				sampler_name
+			));
+			goto fail;
+		}
 	}
 
 	for (int i = 0; i < asize(reflection->uniform_blocks); ++i) {
@@ -526,8 +581,10 @@ grain_dsl_compile_archetype(
 	out->update_frag_bytecode = update_fs_bytecode;
 	out->render_vert_bytecode = render_vs_bytecode;
 	out->render_frag_bytecode = render_fs_bytecode;
-	out->update_shader = cf_make_shader_from_bytecode(grain_update_vert_bytecode, update_fs_bytecode);
-	out->render_shader = cf_make_shader_from_bytecode(render_vs_bytecode, render_fs_bytecode);
+	if (!grain->headless) {
+		out->update_shader = cf_make_shader_from_bytecode(grain_update_vert_bytecode, update_fs_bytecode);
+		out->render_shader = cf_make_shader_from_bytecode(render_vs_bytecode, render_fs_bytecode);
+	}
 	return true;
 
 fail:

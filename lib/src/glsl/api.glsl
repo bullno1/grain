@@ -55,6 +55,11 @@ struct Ctx {
 	float time;
 };
 
+// Maps a unit UV into a binding's atlas rect
+vec2 atlas_uv(vec4 uvrect, vec2 uv) {
+	return mix(uvrect.xy, uvrect.zw, uv);
+}
+
 uint grain_rng_state;
 
 uint grain_pcg(uint v) {

@@ -22,6 +22,9 @@ test_grain(void) {
 static inline void
 test_grain_init(void) {
 	test_grain_storage = (grain_t){
+		// Archetype definition compiles shaders on the CPU but skips the GPU
+		// shader objects, so full codegen runs headlessly (see internal.h)
+		.headless = true,
 		.arena = cf_make_arena(16, 64 * 1024),
 	};
 }
@@ -45,6 +48,7 @@ test_grain_cleanup(void) {
 	test_grain_free_modules(&test_grain_storage.emitters);
 	test_grain_free_modules(&test_grain_storage.affectors);
 	test_grain_free_modules(&test_grain_storage.renderers);
+	grain_free_archetypes(&test_grain_storage);
 	cf_destroy_arena(&test_grain_storage.arena);
 }
 

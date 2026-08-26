@@ -103,6 +103,20 @@ SCENE_VAR(CK_MAP(module_meta_t*), emitters)
 SCENE_VAR(CK_MAP(module_meta_t*), affectors)
 SCENE_VAR(CK_MAP(module_meta_t*), renderers)
 
+// A sampler slot's binding as the editor tracks it: the archetype only holds
+// GPU handles, the path is editor state. The binding owns its decoded pixels
+// and derives its texture from them on demand.
+typedef struct {
+	char* path;  // sstring; NULL when the slot is unbound
+	CF_Image image;  // pix == NULL when the file could not be resolved
+	CF_Texture texture;
+} texture_binding_meta_t;
+
+// Keyed by "<kind>:<module_index>:<sampler_name>" so the same module in two
+// slots keeps distinct bindings
+SCENE_VAR(CK_MAP(texture_binding_meta_t*), texture_bindings)
+SCENE_VAR(char*, last_texture_path)
+
 // }}}
 
 // Modal {{{
@@ -371,6 +385,10 @@ static const ufa_filter_t system_file_filters[] = {
 	{ .name = "grain system", .pattern = "json" },
 	{ .name = "All files", .pattern = "*" },
 };
+static const ufa_filter_t image_file_filters[] = {
+	{ .name = "PNG image", .pattern = "png" },
+	{ .name = "All files", .pattern = "*" },
+};
 
 bco_static(import_module) {
 	bco_vars(
@@ -475,6 +493,202 @@ module_map_for_kind(grain_module_kind_t kind) {
 		default: return NULL;
 	}
 }
+
+// Texture bindings {{{
+
+static const char*
+texture_binding_key(grain_module_kind_t kind, int module_index, const char* sampler_name) {
+	char buf[256];
+	snprintf(buf, sizeof(buf), "%d:%d:%s", (int)kind, module_index, sampler_name);
+	return sintern(buf);
+}
+
+static texture_binding_meta_t*
+get_or_create_texture_binding(const char* key) {
+	texture_binding_meta_t* meta = map_get(texture_bindings, key);
+	if (meta == NULL) {
+		meta = bgame_malloc(sizeof(texture_binding_meta_t), scene_allocator);
+		*meta = (texture_binding_meta_t){ 0 };
+		map_set(texture_bindings, key, meta);
+	}
+	return meta;
+}
+
+static void
+unbind_texture_meta(texture_binding_meta_t* meta) {
+	if (meta->texture.id != 0) {
+		cf_destroy_texture(meta->texture);
+		meta->texture = (CF_Texture){ 0 };
+	}
+	cf_image_free(&meta->image);
+	meta->image = (CF_Image){ 0 };
+	sfree(meta->path);
+	meta->path = NULL;
+}
+
+static void
+clear_texture_bindings(void) {
+	for (int i = 0; i < map_size(texture_bindings); ++i) {
+		unbind_texture_meta(texture_bindings[i]);
+		bgame_free(texture_bindings[i], scene_allocator);
+	}
+	map_free(texture_bindings);
+	texture_bindings = NULL;
+}
+
+static bool
+set_texture_binding_image(
+	texture_binding_meta_t* meta,
+	const char* path,
+	const char* data,
+	size_t size
+) {
+	CF_Image image = { 0 };
+	if (cf_is_error(cf_image_load_png_from_memory(data, (int)size, &image))) {
+		return false;
+	}
+
+	unbind_texture_meta(meta);
+	meta->image = image;
+	sset(meta->path, path);
+	return true;
+}
+
+#ifndef __EMSCRIPTEN__
+
+static bool
+load_texture_binding(texture_binding_meta_t* meta, const char* path) {
+	barena_t arena;
+	barena_init(&arena, bgame_arena_pool);
+	ufa_open_file_t* file = ufa_begin_open_file((ufa_config_t){
+		.arena = &arena,
+		.memalign = barena_memalign,
+		.filename = path,
+	});
+
+	bool ok = false;
+	if (ufa_check_open_file(file) == UFA_OK) {
+		const char* data = read_open_file(file);
+		if (data != NULL) {
+			ok = set_texture_binding_image(meta, path, data, (size_t)slen(data));
+		}
+	}
+
+	ufa_end_open_file(file);
+	barena_reset(&arena);
+	return ok;
+}
+
+#endif
+
+// Pushes every bound slot at the pool. Runs each frame so pool recreation and
+// archetype reload need no special-casing
+static void
+apply_module_texture_bindings(
+	grain_module_kind_t kind,
+	int module_index,
+	const grain_module_info_t* module,
+	grain_archetype_info_t* archetype_info
+) {
+	for (int i = 0; i < module->num_samplers; ++i) {
+		int sampler_index = module->first_sampler + i;
+		const grain_sampler_info_t* sampler_info = &archetype_info->samplers[sampler_index];
+		texture_binding_meta_t* meta = map_get(
+			texture_bindings,
+			texture_binding_key(kind, module_index, sampler_info->name)
+		);
+		if (meta == NULL || meta->image.pix == NULL) { continue; }
+
+		if (meta->texture.id == 0) {
+			CF_TextureParams params = cf_texture_defaults(
+				meta->image.w, meta->image.h
+			);
+			meta->texture = cf_make_texture(params);
+			cf_texture_update(
+				meta->texture,
+				meta->image.pix,
+				meta->image.w * meta->image.h * (int)sizeof(CF_Pixel)
+			);
+		}
+		grain_set_texture(pool, sampler_index, (grain_texture_binding_t){
+			.texture = meta->texture,
+		});
+	}
+}
+
+static void
+apply_texture_bindings(grain_archetype_info_t* archetype_info) {
+	for (int i = 0; i < archetype_info->num_emitters; ++i) {
+		apply_module_texture_bindings(
+			GRAIN_MODULE_EMITTER, i, &archetype_info->emitters[i], archetype_info
+		);
+	}
+	for (int i = 0; i < archetype_info->num_affectors; ++i) {
+		apply_module_texture_bindings(
+			GRAIN_MODULE_AFFECTOR, i, &archetype_info->affectors[i], archetype_info
+		);
+	}
+	apply_module_texture_bindings(
+		GRAIN_MODULE_RENDERER, 0, &archetype_info->renderer, archetype_info
+	);
+}
+
+bco_static(pick_texture, const char* binding_key) {
+	bco_vars(
+		barena_t arena;
+		ufa_open_file_t* open_file;
+	)
+
+	bco_begin
+	begin_native_modal();
+
+	barena_init(&bco_var(arena), bgame_arena_pool);
+	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
+		.arena = &bco_var(arena),
+		.memalign = barena_memalign,
+		.parent_window = cf_app_get_window(),
+		.filters = image_file_filters,
+		.num_filters = CF_ARRAY_SIZE(image_file_filters),
+		.directory = last_texture_path,
+	});
+
+	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
+		bco_yield();
+	}
+
+	ufa_status_t open_status = ufa_check_open_file(bco_var(open_file));
+	if (open_status == UFA_CANCELLED) { bco_return(); }
+	if (open_status == UFA_ERROR) {
+		show_error(ufa_get_open_file_error(bco_var(open_file)));
+		bco_return();
+	}
+
+	const char* data = read_open_file(bco_var(open_file));
+	if (data == NULL) {
+		show_error(ufa_get_open_file_error(bco_var(open_file)));
+		bco_return();
+	}
+
+	const char* path = ufa_get_open_file_name(bco_var(open_file));
+	texture_binding_meta_t* meta = get_or_create_texture_binding(bco_arg(binding_key));
+	// Decode first: a bad file leaves the previous binding untouched
+	if (!set_texture_binding_image(meta, path, data, (size_t)slen(data))) {
+		show_error("Not a valid PNG file");
+		bco_return();
+	}
+	remember_directory(&last_texture_path, path);
+	unsaved_changes = true;
+
+	BLOG_INFO("Bound texture %s", path);
+
+	bco_end
+
+	ufa_end_open_file(bco_var(open_file));
+	barena_reset(&bco_var(arena));
+	end_native_modal();
+}
+
+// }}}
 
 // The new pool is created before the old one is destroyed so that a rejected
 // configuration (grain_create_pool validates it) leaves the current pool running.
@@ -704,6 +918,45 @@ show_module_params(
 	}
 }
 
+static void
+show_module_samplers(
+	grain_module_kind_t kind,
+	int module_index,
+	const grain_module_info_t* module,
+	grain_archetype_info_t* archetype_info
+) {
+	for (int i = 0; i < module->num_samplers; ++i) {
+		int sampler_index = module->first_sampler + i;
+		const grain_sampler_info_t* sampler_info =
+			&archetype_info->samplers[sampler_index];
+		const char* key = texture_binding_key(kind, module_index, sampler_info->name);
+		texture_binding_meta_t* meta = map_get(texture_bindings, key);
+		bool has_path = meta != NULL && meta->path != NULL;
+
+		ImGui_PushID(sampler_info->name);
+
+		ImGui_Text(
+			"%s: %s%s",
+			sampler_info->name,
+			has_path ? meta->path : "(none)",
+			has_path && meta->image.pix == NULL ? " (not loaded)" : ""
+		);
+		if (ImGui_Button("Browse...")) {
+			start_modal_action(pick_texture, key);
+		}
+		if (has_path) {
+			ImGui_SameLine();
+			if (ImGui_Button("Clear")) {
+				unbind_texture_meta(meta);
+				grain_set_texture(pool, sampler_index, (grain_texture_binding_t){ 0 });
+				unsaved_changes = true;
+			}
+		}
+
+		ImGui_PopID();
+	}
+}
+
 // }}}
 
 // Document lifecycle {{{
@@ -716,6 +969,22 @@ save_module_path(void* userdata, grain_module_kind_t kind, const char* module_na
 
 	module_meta_t* module_meta = map_get(*module_map, sintern(module_name));
 	return module_meta != NULL ? module_meta->path : NULL;
+}
+
+static const char*
+save_texture_path(
+	void* userdata,
+	grain_module_kind_t kind,
+	int module_index,
+	const char* module_name,
+	const char* sampler_name
+) {
+	(void)userdata;
+	(void)module_name;
+	texture_binding_meta_t* meta = map_get(
+		texture_bindings, texture_binding_key(kind, module_index, sampler_name)
+	);
+	return meta != NULL ? meta->path : NULL;
 }
 
 // Waits until the user picks a choice in the "Unsaved changes" modal.
@@ -776,6 +1045,7 @@ bco_static(do_save_system, bool force_dialog) {
 			.name = system_name.data[0] != '\0' ? system_name.data : NULL,
 			.emission_rate = emission_rate,
 			.module_path = save_module_path,
+			.texture_path = save_texture_path,
 		},
 		doc
 	);
@@ -831,6 +1101,7 @@ reset_editor_system(void) {
 	barray_clear(archetype_affectors);
 	archetype_renderer = noop_renderer;
 	gui_renderer_index = -1;
+	clear_texture_bindings();
 
 	grain_archetype_t* new_archetype = grain_define_archetype(
 		grain, "Editor",
@@ -1003,6 +1274,32 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 	current_lifetime_budget = pending_lifetime_budget = loaded_opts.lifetime_budget;
 	current_max_emission_rate = pending_max_emission_rate = loaded_opts.max_emission_rate;
 	current_max_burst_size = pending_max_burst_size = loaded_opts.max_burst_size;
+
+	// Texture bindings: the blueprint carries paths only
+	clear_texture_bindings();
+	int num_textures = grain_blueprint_num_textures(blueprint);
+	for (int i = 0; i < num_textures; ++i) {
+		grain_blueprint_texture_info_t texture_info =
+			grain_blueprint_get_texture(blueprint, i);
+		texture_binding_meta_t* meta = get_or_create_texture_binding(
+			texture_binding_key(
+				texture_info.kind, texture_info.module_index, texture_info.sampler_name
+			)
+		);
+#ifndef __EMSCRIPTEN__
+		if (!load_texture_binding(meta, texture_info.path)) {
+			BLOG_WARN("%s is missing; leaving `%s` unbound",
+				texture_info.path, texture_info.sampler_name);
+			sset(meta->path, texture_info.path);
+		}
+#else
+		// The web build can only reach files through a dialog: keep the path
+		// for saving, sample the fallback until the user rebinds
+		BLOG_WARN("Cannot resolve %s; rebind `%s` manually",
+			texture_info.path, texture_info.sampler_name);
+		sset(meta->path, texture_info.path);
+#endif
+	}
 
 	// Params and system state
 	grain_blueprint_apply(blueprint, particle_system);
@@ -1226,10 +1523,12 @@ cleanup(void) {
 	cleanup_module_map(&emitters);
 	cleanup_module_map(&affectors);
 	cleanup_module_map(&renderers);
+	clear_texture_bindings();
 	sfree(tmp_source_buf);
 	sfree(popup_error);
 	sfree(last_module_path);
 	sfree(last_system_path);
+	sfree(last_texture_path);
 
 	ufa_release_file_ref(current_file_ref);
 }
@@ -1416,6 +1715,7 @@ update(void) {
 				ImGui_SeparatorText(module->name);
 
 				show_module_params(module, &archetype_info);
+				show_module_samplers(GRAIN_MODULE_EMITTER, i, module, &archetype_info);
 
 				if (ImGui_Button("Remove")) {
 					remove_index = i;
@@ -1453,6 +1753,7 @@ update(void) {
 				ImGui_SeparatorText(module->name);
 
 				show_module_params(module, &archetype_info);
+				show_module_samplers(GRAIN_MODULE_AFFECTOR, i, module, &archetype_info);
 
 				if (ImGui_Button("Remove")) {
 					remove_index = i;
@@ -1483,6 +1784,9 @@ update(void) {
 	if (show_renderer) {
 		if (ImGui_Begin("Renderer", &show_renderer, ImGuiWindowFlags_AlwaysAutoResize)) {
 			show_module_params(&archetype_info.renderer, &archetype_info);
+			show_module_samplers(
+				GRAIN_MODULE_RENDERER, 0, &archetype_info.renderer, &archetype_info
+			);
 
 			if (map_size(renderers) > 0) {
 				if (show_module_list(renderers, "Type", &gui_renderer_index)) {
@@ -1493,6 +1797,8 @@ update(void) {
 		}
 		ImGui_End();
 	}
+
+	apply_texture_bindings(&archetype_info);
 
 	grain_tick(particle_system, CF_DELTA_TIME);
 	grain_end_update(grain);

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <cute_graphics.h>
+#include <cute_draw.h>
 #include <cute_json.h>
 
 typedef struct grain_s grain_t;
@@ -82,10 +83,19 @@ typedef struct {
 	int num_decorators;
 } grain_param_info_t;
 
+//! A texture slot declared in a module's `Samplers` block
+typedef struct {
+	const char* name;
+	const grain_param_decorator_t* decorators;
+	int num_decorators;
+} grain_sampler_info_t;
+
 typedef struct {
 	const char* name;
 	int first_param;
 	int num_params;
+	int first_sampler;
+	int num_samplers;
 } grain_module_info_t;
 
 typedef struct {
@@ -97,6 +107,7 @@ typedef struct {
 
 	const grain_module_info_t  renderer;
 	const grain_param_info_t* params;
+	const grain_sampler_info_t* samplers;
 } grain_archetype_info_t;
 
 grain_t*
@@ -146,6 +157,10 @@ grain_get_renderer_name(grain_renderer_t* renderer);
 const grain_param_decorator_t*
 grain_find_decorator(const grain_param_info_t* param, const char* name);
 
+//! Linear search of a sampler's decorators by name; NULL if absent.
+const grain_param_decorator_t*
+grain_find_sampler_decorator(const grain_sampler_info_t* sampler, const char* name);
+
 /**
  * Find a decorator argument
  *
@@ -163,6 +178,53 @@ grain_find_decorator_arg(
 
 grain_pool_t*
 grain_create_pool(grain_t* grain, grain_pool_opts_t opts);
+
+typedef struct {
+	//! .id == 0 resets the slot to grain's built-in fallback (1x1 opaque white)
+	CF_Texture texture;
+	//! UV rect inside `texture`; leave all four zero for the full texture
+	float uv_min[2];
+	float uv_max[2];
+	//! Optional standalone sampler; .id == 0 keeps the sampler baked into
+	//! `texture`. How a caller honors @filter/@wrap decorator hints at bind time.
+	CF_Sampler sampler;
+} grain_texture_binding_t;
+
+/**
+ * Bind a texture to one of this pool's sampler slots.
+ *
+ * Bindings are per-pool: every system in the pool samples the same texture.
+ * Module code reads the slot's `<name>_uvrect` as (uv_min, uv_max)
+ * and can remap unit UVs with `atlas_uv`.
+ *
+ * The binding survives live reload as long as the module keeps a sampler of
+ * the same name; a slot whose sampler disappears is unbound.
+ *
+ * @param sampler_index Index into grain_archetype_info_t::samplers
+ *        (grain_module_info_t::first_sampler + i).
+ */
+void
+grain_set_texture(grain_pool_t* pool, int sampler_index, grain_texture_binding_t binding);
+
+/**
+ * Bind an atlased sprite's current image to one of this pool's sampler slots.
+ *
+ * Include cute_draw.h before grain.h to enable this helper; the library
+ * itself only depends on cute_graphics.h.
+ *
+ * Call it every frame while the binding is live: the sprite can animate and
+ * CF's dynamic atlas can reshuffle, so the CF_TemporaryImage this reads is
+ * only valid until the next cf_render_to / cf_app_draw_onto_screen.
+ */
+static inline void
+grain_set_sprite(grain_pool_t* pool, int sampler_index, const CF_Sprite* sprite) {
+	CF_TemporaryImage image = cf_fetch_image(sprite);
+	grain_set_texture(pool, sampler_index, (grain_texture_binding_t){
+		.texture = image.tex,
+		.uv_min = { image.u.x, image.u.y },
+		.uv_max = { image.v.x, image.v.y },
+	});
+}
 
 grain_pool_t*
 grain_get_pool(grain_system_t* system);
@@ -276,6 +338,24 @@ typedef struct {
 	 * The library stores the path verbatim and never resolves it.
 	 */
 	const char* (*module_path)(void* userdata, grain_module_kind_t kind, const char* module_name);
+
+	/**
+	 * Optional texture path lookup, one call per sampler slot; return NULL to
+	 * omit the binding.
+	 *
+	 * The library stores the path verbatim and never resolves it: on load the
+	 * caller reads the records back (@ref grain_blueprint_get_texture) and
+	 * binds with @ref grain_set_texture. `module_index` disambiguates the same
+	 * module occupying several slots; the renderer always passes 0.
+	 */
+	const char* (*texture_path)(
+		void* userdata,
+		grain_module_kind_t kind,
+		int module_index,
+		const char* module_name,
+		const char* sampler_name
+	);
+
 	void* userdata;
 } grain_save_opts_t;
 
@@ -350,5 +430,29 @@ grain_blueprint_num_modules(grain_blueprint_t* blueprint);
 
 grain_blueprint_module_t
 grain_blueprint_get_module(grain_blueprint_t* blueprint, int index);
+
+//! A texture binding saved in a blueprint, as path metadata only
+typedef struct {
+	grain_module_kind_t kind;
+	//! Position within its kind's slot list; 0 for the renderer
+	int module_index;
+	const char* module_name;
+	const char* sampler_name;
+	const char* path;
+} grain_blueprint_texture_info_t;
+
+/**
+ * Saved texture bindings, flattened over all slots.
+ *
+ * grain_blueprint_apply never touches textures -- the library has no pixels
+ * and never reads files. Resolve each record's path yourself and bind through
+ * @ref grain_set_texture (the slot index is
+ * grain_module_info_t::first_sampler + the sampler's position in its module).
+ */
+int
+grain_blueprint_num_textures(grain_blueprint_t* blueprint);
+
+grain_blueprint_texture_info_t
+grain_blueprint_get_texture(grain_blueprint_t* blueprint, int index);
 
 #endif

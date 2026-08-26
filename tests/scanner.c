@@ -15,6 +15,7 @@ static struct {
 	char* stripped;
 	CK_DYNA grain_decorator_t* decorators;
 	CK_DYNA grain_decorator_arg_t* args;
+	CK_DYNA const char** samplers;
 } fixture;
 
 static void
@@ -23,6 +24,7 @@ init_per_test(void) {
 	fixture.stripped = NULL;
 	fixture.decorators = NULL;
 	fixture.args = NULL;
+	fixture.samplers = NULL;
 }
 
 static void
@@ -30,6 +32,7 @@ cleanup_per_test(void) {
 	cf_free(fixture.stripped);
 	afree(fixture.decorators);
 	afree(fixture.args);
+	afree(fixture.samplers);
 	test_grain_cleanup();
 }
 
@@ -41,7 +44,8 @@ extract(const char* source) {
 	fixture.stripped = cf_alloc(len + 1);
 	memcpy(fixture.stripped, source, len + 1);
 	return grain_decorator_extract(
-		test_grain(), fixture.stripped, &fixture.decorators, &fixture.args
+		test_grain(), fixture.stripped, &fixture.decorators, &fixture.args,
+		&fixture.samplers
 	);
 }
 

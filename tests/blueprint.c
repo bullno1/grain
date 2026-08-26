@@ -57,7 +57,10 @@ static const char* valid_blueprint =
 	"		\"affectors\": ["
 	"			{ \"module\": \"Gravity\", \"params\": { \"gravity\": [0, -9.81] } }"
 	"		],"
-	"		\"renderer\": { \"module\": \"Quad\" }"
+	"		\"renderer\": {"
+	"			\"module\": \"Quad\","
+	"			\"textures\": { \"image\": \"sprites/fire.png\" }"
+	"		}"
 	"	}"
 	"}";
 
@@ -102,6 +105,44 @@ BTEST(blueprint, parse_valid) {
 
 	BTEST_EXPECT(bp.renderer_slot.module == sintern("Quad"));
 	BTEST_EXPECT_EQUAL("%d", asize(bp.renderer_slot.params), 0);
+
+	// Slots without a `textures` key parse to none (optional on load)
+	BTEST_EXPECT_EQUAL("%d", asize(bp.emitter_slots[0].textures), 0);
+	BTEST_ASSERT_EQUAL("%d", asize(bp.renderer_slot.textures), 1);
+	BTEST_EXPECT(bp.renderer_slot.textures[0].sampler_name == sintern("image"));
+	BTEST_EXPECT(strcmp(bp.renderer_slot.textures[0].path, "sprites/fire.png") == 0);
+
+	// The flattened accessors see the same records
+	BTEST_ASSERT_EQUAL("%d", grain_blueprint_num_textures(&bp), 1);
+	grain_blueprint_texture_info_t texture_info = grain_blueprint_get_texture(&bp, 0);
+	BTEST_EXPECT_EQUAL("%d", texture_info.kind, GRAIN_MODULE_RENDERER);
+	BTEST_EXPECT_EQUAL("%d", texture_info.module_index, 0);
+	BTEST_EXPECT(texture_info.module_name == sintern("Quad"));
+	BTEST_EXPECT(texture_info.sampler_name == sintern("image"));
+	BTEST_EXPECT(strcmp(texture_info.path, "sprites/fire.png") == 0);
+
+	grain_blueprint_cleanup(&bp);
+	cf_destroy_json(doc);
+}
+
+BTEST(blueprint, parse_bad_texture_value) {
+	grain_blueprint_t bp = { 0 };
+	bool ok;
+	CF_JDoc doc = test_parse(
+		"{"
+		"	\"grain_version\": 1,"
+		"	\"pool\": { \"max_emission_rate\": 1, \"lifetime_budget\": 1 },"
+		"	\"modules\": ["
+		"		{ \"kind\": \"renderer\", \"name\": \"Quad\", \"source\": \"x\" }"
+		"	],"
+		"	\"archetype\": {"
+		"		\"renderer\": { \"module\": \"Quad\", \"textures\": { \"image\": 5 } }"
+		"	}"
+		"}",
+		&bp, &ok
+	);
+	BTEST_EXPECT(!ok);
+	GRAIN_EXPECT_ERROR_CONTAINS("`Quad.image` must be a path string");
 
 	grain_blueprint_cleanup(&bp);
 	cf_destroy_json(doc);
@@ -230,9 +271,17 @@ BTEST(blueprint, emit_parse_round_trip) {
 		// Larger than INT32_MAX to exercise the u64 path
 		.components = { 4278190080.0 },
 	}));
+	apush(emitter_slot.textures, ((grain_blueprint_texture_t){
+		.sampler_name = sintern("noise"),
+		.path = test_strdup("textures/noise.png"),
+	}));
 	apush(bp.emitter_slots, emitter_slot);
 
 	bp.renderer_slot.module = sintern("Quad");
+	apush(bp.renderer_slot.textures, ((grain_blueprint_texture_t){
+		.sampler_name = sintern("image"),
+		.path = test_strdup("sprites/fire.png"),
+	}));
 
 	// Emit, print, re-read and re-parse: the full text round trip
 	CF_JDoc out_doc = cf_make_json(NULL, 0);
@@ -279,6 +328,18 @@ BTEST(blueprint, emit_parse_round_trip) {
 	}
 
 	BTEST_EXPECT(parsed.renderer_slot.module == sintern("Quad"));
+
+	BTEST_ASSERT_EQUAL("%d", asize(parsed.emitter_slots[0].textures), 1);
+	BTEST_EXPECT(parsed.emitter_slots[0].textures[0].sampler_name == sintern("noise"));
+	BTEST_EXPECT(
+		strcmp(parsed.emitter_slots[0].textures[0].path, "textures/noise.png") == 0
+	);
+	BTEST_ASSERT_EQUAL("%d", asize(parsed.renderer_slot.textures), 1);
+	BTEST_EXPECT(parsed.renderer_slot.textures[0].sampler_name == sintern("image"));
+	BTEST_EXPECT(
+		strcmp(parsed.renderer_slot.textures[0].path, "sprites/fire.png") == 0
+	);
+	BTEST_EXPECT_EQUAL("%d", grain_blueprint_num_textures(&parsed), 2);
 
 	grain_blueprint_cleanup(&parsed);
 	grain_blueprint_cleanup(&bp);

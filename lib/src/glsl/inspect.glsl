@@ -5,8 +5,12 @@
 #define Renderer(X) layout(set = 0, binding = 4) uniform grain_Inspect_Renderer { float X; } Renderer;
 #define Requires(X) struct ParticleAttrs { X float grain_ignore; }; layout(set = 0, binding = 1) uniform grain_Inspect_Requires {X float grain_ignore;} Requires;
 #define Params(X) struct ModuleParams { X float grain_ignore; }; layout(set = 0, binding = 2) uniform grain_Inspect_Params {X float grain_ignore;} Params;
+#define Samplers(X)
 
 mat4 grain_transform;
+
+// Generated declarations for the module's Samplers block
+#include "grain/samplers.glsl"
 
 #include "module.glsl"
 

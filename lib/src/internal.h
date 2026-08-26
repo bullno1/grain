@@ -20,7 +20,16 @@ typedef struct {
 } grain_module_t;
 
 struct grain_s {
+	// Set only by the headless tests (which build this struct by hand):
+	// archetype definition then compiles all shaders on the CPU but skips the
+	// GPU shader objects, so the full codegen is verifiable without a GPU.
+	bool headless;
+
 	CF_Mesh dummy_mesh;
+	// Bound to every sampler slot without a user texture: CF requires all
+	// declared samplers fed. Opaque white, so unbound slots multiply to a
+	// visible tint instead of silently rendering nothing.
+	CF_Texture fallback_texture;
 	CF_Arena arena;
 	const char* last_error;
 	int render_gen;
@@ -38,6 +47,10 @@ struct grain_s {
 
 void
 grain_set_last_error(grain_t* grain, const char* message);
+
+//! Destroy every archetype; shared between grain_destroy and test cleanup
+void
+grain_free_archetypes(grain_t* grain);
 
 GRAIN_FORMAT_ATTRIBUTE(2, 3)
 const char*

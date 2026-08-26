@@ -36,14 +36,15 @@ grain_skip_space(char** pos_ptr) {
 }
 
 static char*
-grain_find_params_block(char* source) {
+grain_find_block(char* source, const char* name) {
+	size_t name_len = strlen(name);
 	char* pos = source;
 	while (*pos != '\0') {
 		if (!grain_skip_space(&pos)) { return NULL; }
 		if (grain_is_ident_start(*pos)) {
 			char* start = pos;
 			while (grain_is_ident_char(*pos)) { ++pos; }
-			if (pos - start == 6 && memcmp(start, "Params", 6) == 0) {
+			if ((size_t)(pos - start) == name_len && memcmp(start, name, name_len) == 0) {
 				char* after = pos;
 				if (!grain_skip_space(&after)) { return NULL; }
 				if (*after == '(') { return after + 1; }
@@ -288,17 +289,138 @@ end:
 	return ok;
 }
 
+// The Samplers grammar is strict: `sampler2D <name>;` only  because unlike
+// Params the declarations never reach the GLSL compiler for validation: the
+// block is discarded by `#define Samplers(X)` and grain re-emits managed
+// declarations from the scanned names.
+static bool
+grain_scan_samplers_block(
+	grain_t* grain,
+	char* block,
+	CK_DYNA grain_decorator_t** decorators,
+	CK_DYNA grain_decorator_arg_t** args,
+	CK_DYNA const char*** samplers
+) {
+	const char* sampler2d = sintern("sampler2D");
+	int pending_start = asize(*decorators);
+	int first_sampler = asize(*samplers);
+
+	char* pos = block;
+	for (;;) {
+		if (!grain_skip_space(&pos)) {
+			grain_set_last_error(grain, "Unterminated comment in `Samplers` block");
+			return false;
+		}
+		char c = *pos;
+		if (c == '\0') {
+			grain_set_last_error(grain, "Unterminated `Samplers` block");
+			return false;
+		} else if (c == ')') {
+			if (asize(*decorators) > pending_start) {
+				grain_set_last_error(grain, "Decorator is not attached to any declaration");
+				return false;
+			}
+			if (asize(*samplers) == first_sampler) {
+				grain_set_last_error(grain, "Empty `Samplers` block");
+				return false;
+			}
+			return true;
+		} else if (c == '@') {
+			char* start = pos;
+			if (!grain_parse_decorator(grain, &pos, decorators, args)) { return false; }
+			grain_blank(start, pos);
+		} else if (grain_is_ident_start(c)) {
+			char* start = pos;
+			while (grain_is_ident_char(*pos)) { ++pos; }
+			if (sintern_range(start, pos) != sampler2d) {
+				grain_set_last_error(
+					grain,
+					"Only `sampler2D` declarations are allowed in a `Samplers` block"
+				);
+				return false;
+			}
+			if (!grain_skip_space(&pos)) {
+				grain_set_last_error(grain, "Unterminated comment in `Samplers` block");
+				return false;
+			}
+			if (!grain_is_ident_start(*pos)) {
+				grain_set_last_error(grain, "Expected a sampler name after `sampler2D`");
+				return false;
+			}
+			char* name_start = pos;
+			while (grain_is_ident_char(*pos)) { ++pos; }
+			const char* name = sintern_range(name_start, pos);
+			if (strncmp(name, "grain_", 6) == 0) {
+				grain_set_last_error(grain, grain_sprintf(
+					grain,
+					"`Samplers` block member `%s` uses the reserved `grain_` prefix",
+					name
+				));
+				return false;
+			}
+			for (int i = first_sampler; i < asize(*samplers); ++i) {
+				if ((*samplers)[i] == name) {
+					grain_set_last_error(grain, grain_sprintf(
+						grain, "Duplicate sampler `%s`", name
+					));
+					return false;
+				}
+			}
+			if (!grain_skip_space(&pos)) {
+				grain_set_last_error(grain, "Unterminated comment in `Samplers` block");
+				return false;
+			}
+			if (*pos == ',') {
+				grain_set_last_error(
+					grain,
+					"Only one sampler per declaration is allowed in a `Samplers` block"
+				);
+				return false;
+			}
+			if (*pos != ';') {
+				grain_set_last_error(grain, grain_sprintf(
+					grain, "Expected `;` after sampler `%s`", name
+				));
+				return false;
+			}
+			++pos;
+			int num_pending = asize(*decorators) - pending_start;
+			for (int i = 0; i < num_pending; ++i) {
+				(*decorators)[pending_start + i].param = name;
+			}
+			pending_start = asize(*decorators);
+			apush(*samplers, name);
+		} else {
+			grain_set_last_error(grain, grain_sprintf(
+				grain, "Unexpected `%c` in `Samplers` block", c
+			));
+			return false;
+		}
+	}
+}
+
 bool
 grain_decorator_extract(
 	grain_t* grain,
 	char* source,
 	CK_DYNA grain_decorator_t** decorators,
-	CK_DYNA grain_decorator_arg_t** args
+	CK_DYNA grain_decorator_arg_t** args,
+	CK_DYNA const char*** samplers
 ) {
-	char* block = grain_find_params_block(source);
-	// No Params block: nothing to strip, leave the source to the compiler.
-	if (block == NULL) { return true; }
-	return grain_scan_params_block(grain, block, decorators, args);
+	// Absent blocks are fine: nothing to strip, leave the source to the compiler.
+	char* params_block = grain_find_block(source, "Params");
+	if (params_block != NULL) {
+		if (!grain_scan_params_block(grain, params_block, decorators, args)) {
+			return false;
+		}
+	}
+	char* samplers_block = grain_find_block(source, "Samplers");
+	if (samplers_block != NULL) {
+		if (!grain_scan_samplers_block(grain, samplers_block, decorators, args, samplers)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 const grain_param_decorator_t*
@@ -307,6 +429,17 @@ grain_find_decorator(const grain_param_info_t* param, const char* name) {
 	for (int i = 0; i < param->num_decorators; ++i) {
 		if (param->decorators[i].name == interned) {
 			return &param->decorators[i];
+		}
+	}
+	return NULL;
+}
+
+const grain_param_decorator_t*
+grain_find_sampler_decorator(const grain_sampler_info_t* sampler, const char* name) {
+	const char* interned = sintern(name);
+	for (int i = 0; i < sampler->num_decorators; ++i) {
+		if (sampler->decorators[i].name == interned) {
+			return &sampler->decorators[i];
 		}
 	}
 	return NULL;

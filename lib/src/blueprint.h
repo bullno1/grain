@@ -17,10 +17,18 @@ typedef struct {
 	double components[GRAIN_BLUEPRINT_MAX_COMPONENTS];
 } grain_blueprint_param_t;
 
+//! A texture binding saved as caller-provided path metadata; never resolved
+//! by the library itself
+typedef struct {
+	const char* sampler_name;  // interned
+	char* path;                // cf_alloc copy owned by the blueprint
+} grain_blueprint_texture_t;
+
 //! One position in the archetype's module list along with its saved param values
 typedef struct {
 	const char* module;  // interned module name
 	CK_DYNA grain_blueprint_param_t* params;
+	CK_DYNA grain_blueprint_texture_t* textures;
 } grain_blueprint_slot_t;
 
 struct grain_blueprint_s {

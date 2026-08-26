@@ -43,6 +43,17 @@ A module is a self-contained compilation unit with:
 
   A parameter can be annotated with `@decorator(...)` lines such as `@range(min = 0, step = 0.1)` or `@color`.
   The library strips them before compilation and exposes them through reflection without assigning any meaning; tools like the editor interpret them, e.g. as UI hints.
+* An optional `Samplers` block listing the textures the module reads.
+  Each declaration is exactly `sampler2D name;`.
+  An emitter might sample a noise or property-curve texture, an affector a vector field, a renderer the particle's image.
+
+  Inside `process` the sampler is referenced by its name, and a companion `vec4 name_uvrect` holds the bound texture's UV rect, `(0,0)-(1,1)`, for a raw texture, or the sprite's region inside its atlas.
+  `atlas_uv(name_uvrect, uv)` maps a unit UV into that rect.
+
+  Textures are bound per pool with `grain_set_texture` (raw `CF_Texture` plus optional UV rect and `CF_Sampler`)
+  For a sprite, use: `grain_set_sprite`.
+  Every system in a pool samples the same textures; per-system variation comes from the UV rect.
+  An unbound slot samples an opaque white fallback.
 * A GLSL function with the signature `void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx)`.
   It will be run on the GPU for each particle.
 
@@ -86,6 +97,8 @@ Moreover, updating and rendering of particle systems belonging to the same arche
 To help with authoring, the library also supports live reload of module code.
 Changing the code within a `process` function of a module should have an immediate effect on all affected particle system.
 Changing the members in a `Params` block will trigger a migration: all parameters with the same name and type will be copied over to the new module.
+`Samplers` blocks migrate the same way, keyed by name: a binding survives as long as its module keeps a sampler of the same name, a removed sampler drops its binding, and a re-added one starts on the fallback texture.
+Sampler changes never reset particles.
 Only structural change of a particle's attributes will result in a reset of the particle system:
 
 * Adding or removing members from a `Requires` block such that it changes the composition of a `ParticleAttrs` type.

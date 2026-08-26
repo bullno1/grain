@@ -9,6 +9,8 @@ set(SOURCES
 	"find.c"
 	"module.c"
 	"kind.c"
+	"sampler.c"
+	"archetype.c"
 	"blueprint.c"
 	"clock.c"
 )

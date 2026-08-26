@@ -18,6 +18,13 @@ struct grain_archetype_s {
 	CK_DYNA grain_param_info_t* params;
 	CK_DYNA int* params_offsets;
 
+	// Sampler slots in canonical order (emitters, affectors, renderer); slot j
+	// is bound as `grain_sampler_<j>` at binding num_textures + j.
+	CK_DYNA grain_sampler_info_t* samplers;
+	// Parallel to `samplers`: interned owning-module names, for binding
+	// migration and blueprint capture.
+	CK_DYNA const char** sampler_module_names;
+
 	// Deep copies of module decorators: the archetype outlives module
 	// redefinitions. Exact-size so the pointers handed out never move.
 	grain_param_decorator_t* param_decorators;
@@ -61,6 +68,13 @@ typedef struct {
 	int stride;
 } grain_param_layout_t;
 
+typedef struct {
+	const char* module_name;  // interned, keys migration across reloads
+	const char* name;         // interned sampler local name
+	grain_texture_binding_t binding;
+	bool bound;
+} grain_pool_sampler_t;
+
 struct grain_pool_s {
 	grain_t* grain;
 	grain_pool_opts_t opts;
@@ -91,6 +105,9 @@ struct grain_pool_s {
 	uint64_t attr_layout_hash;
 	grain_param_layout_t update_layout;
 	grain_param_layout_t render_layout;
+
+	// Parallel to the archetype's sampler slots
+	CK_DYNA grain_pool_sampler_t* sampler_bindings;
 };
 
 typedef struct {
@@ -133,10 +150,28 @@ grain_cleanup_archetype(grain_archetype_t* archetype) {
 	afree(archetype->affectors);
 	afree(archetype->params);
 	afree(archetype->params_offsets);
+	afree(archetype->samplers);
+	afree(archetype->sampler_module_names);
 	cf_free(archetype->param_decorators);
 	cf_free(archetype->param_decorator_args);
-	cf_destroy_shader(archetype->shaders.update_shader);
-	cf_destroy_shader(archetype->shaders.render_shader);
+	// Zero in headless test runs, which never create the GPU objects
+	if (archetype->shaders.update_shader.id != 0) {
+		cf_destroy_shader(archetype->shaders.update_shader);
+	}
+	if (archetype->shaders.render_shader.id != 0) {
+		cf_destroy_shader(archetype->shaders.render_shader);
+	}
+}
+
+void
+grain_free_archetypes(grain_t* grain) {
+	for (int i = 0; i < map_size(grain->archetypes); ++i) {
+		grain_archetype_t* archetype = grain->archetypes[i];
+		grain_cleanup_archetype(archetype);
+		cf_free(archetype);
+	}
+	map_free(grain->archetypes);
+	grain->archetypes = NULL;
 }
 
 // Copies the source and blanks decorators out of the copy; the copy is what
@@ -146,18 +181,21 @@ grain_strip_decorators(
 	grain_t* grain,
 	const char* source,
 	CK_DYNA grain_decorator_t** decorators,
-	CK_DYNA grain_decorator_arg_t** decorator_args
+	CK_DYNA grain_decorator_arg_t** decorator_args,
+	CK_DYNA const char*** samplers
 ) {
 	size_t source_len = strlen(source);
 	char* stripped = cf_alloc(source_len + 1);
 	memcpy(stripped, source, source_len + 1);
 
-	if (!grain_decorator_extract(grain, stripped, decorators, decorator_args)) {
+	if (!grain_decorator_extract(grain, stripped, decorators, decorator_args, samplers)) {
 		cf_free(stripped);
 		afree(*decorators);
 		afree(*decorator_args);
+		afree(*samplers);
 		*decorators = NULL;
 		*decorator_args = NULL;
+		*samplers = NULL;
 		return NULL;
 	}
 
@@ -168,18 +206,21 @@ static grain_dsl_module_info_t*
 grain_analyze_module(grain_t* grain, const char* source, char** stripped_out) {
 	CK_DYNA grain_decorator_t* decorators = NULL;
 	CK_DYNA grain_decorator_arg_t* decorator_args = NULL;
-	char* stripped = grain_strip_decorators(grain, source, &decorators, &decorator_args);
+	CK_DYNA const char** samplers = NULL;
+	char* stripped = grain_strip_decorators(
+		grain, source, &decorators, &decorator_args, &samplers
+	);
 	if (stripped == NULL) { return NULL; }
 
 	grain_dsl_module_info_t* module_info = grain_dsl_parse_module(
-		grain, stripped, CSPV_STAGE_FRAGMENT
+		grain, stripped, CSPV_STAGE_FRAGMENT, samplers
 	);
 	if (module_info == NULL) { goto fail; }
 
 	// A renderer also has a vertex stage; it has to compile too
 	if (module_info->kind == GRAIN_MODULE_RENDERER) {
 		grain_dsl_module_info_t* vsh_info = grain_dsl_parse_module(
-			grain, stripped, CSPV_STAGE_VERTEX
+			grain, stripped, CSPV_STAGE_VERTEX, samplers
 		);
 		if (vsh_info == NULL) {
 			grain_dsl_free_module_info(module_info);
@@ -188,12 +229,45 @@ grain_analyze_module(grain_t* grain, const char* source, char** stripped_out) {
 		grain_dsl_free_module_info(vsh_info);
 	}
 
+	// A sampler is renamed to its slot's global with `#define`, which rewrites
+	// every token of that name: a param or attribute sharing it would be
+	// silently rewritten too.
+	for (int i = 0; i < asize(samplers); ++i) {
+		for (int j = 0; j < asize(module_info->module_params); ++j) {
+			if (module_info->module_params[j].name == samplers[i]) {
+				grain_set_last_error(grain, grain_sprintf(
+					grain,
+					"Sampler `%s` has the same name as a module parameter",
+					samplers[i]
+				));
+				grain_dsl_free_module_info(module_info);
+				goto fail;
+			}
+		}
+		for (int j = 0; j < asize(module_info->particle_attrs); ++j) {
+			if (module_info->particle_attrs[j].name == samplers[i]) {
+				grain_set_last_error(grain, grain_sprintf(
+					grain,
+					"Sampler `%s` has the same name as a particle attribute",
+					samplers[i]
+				));
+				grain_dsl_free_module_info(module_info);
+				goto fail;
+			}
+		}
+	}
+
 	for (int i = 0; i < asize(decorators); ++i) {
 		bool found = false;
 		for (int j = 0; j < asize(module_info->module_params); ++j) {
 			if (module_info->module_params[j].name == decorators[i].param) {
 				found = true;
 				break;
+			}
+		}
+		for (int j = 0; !found && j < asize(samplers); ++j) {
+			if (samplers[j] == decorators[i].param) {
+				found = true;
 			}
 		}
 		if (!found) {
@@ -208,6 +282,7 @@ grain_analyze_module(grain_t* grain, const char* source, char** stripped_out) {
 	}
 	module_info->decorators = decorators;
 	module_info->decorator_args = decorator_args;
+	module_info->samplers = samplers;
 
 	*stripped_out = stripped;
 	return module_info;
@@ -216,6 +291,7 @@ fail:
 	cf_free(stripped);
 	afree(decorators);
 	afree(decorator_args);
+	afree(samplers);
 	return NULL;
 }
 
@@ -296,17 +372,19 @@ grain_define_module_of_kind(
 }
 
 static void
-grain_copy_param_decorators(
+grain_copy_decorators(
 	grain_archetype_t* archetype,
 	const grain_dsl_module_info_t* module_info,
-	grain_param_info_t* param_info,
+	const char* owner_name,
+	const grain_param_decorator_t** out_decorators,
+	int* out_num_decorators,
 	int* decorator_cursor,
 	int* arg_cursor
 ) {
 	int first = *decorator_cursor;
 	for (int i = 0; i < asize(module_info->decorators); ++i) {
 		grain_decorator_t decorator = module_info->decorators[i];
-		if (decorator.param != param_info->name) { continue; }
+		if (decorator.param != owner_name) { continue; }
 
 		int first_arg = *arg_cursor;
 		for (int j = 0; j < decorator.num_args; ++j) {
@@ -323,8 +401,49 @@ grain_copy_param_decorators(
 	}
 
 	int num = *decorator_cursor - first;
-	param_info->decorators = num > 0 ? &archetype->param_decorators[first] : NULL;
-	param_info->num_decorators = num;
+	*out_decorators = num > 0 ? &archetype->param_decorators[first] : NULL;
+	*out_num_decorators = num;
+}
+
+static void
+grain_copy_param_decorators(
+	grain_archetype_t* archetype,
+	const grain_dsl_module_info_t* module_info,
+	grain_param_info_t* param_info,
+	int* decorator_cursor,
+	int* arg_cursor
+) {
+	grain_copy_decorators(
+		archetype, module_info, param_info->name,
+		&param_info->decorators, &param_info->num_decorators,
+		decorator_cursor, arg_cursor
+	);
+}
+
+// Appends the reflection rows for one module's samplers, deep-copying their
+// decorators through the same storage as param decorators.
+static void
+grain_collect_module_samplers(
+	grain_archetype_t* archetype,
+	const grain_dsl_module_info_t* module_info,
+	grain_module_info_t* out_module_info,
+	int* decorator_cursor,
+	int* arg_cursor
+) {
+	out_module_info->first_sampler = asize(archetype->samplers);
+	out_module_info->num_samplers = asize(module_info->samplers);
+	for (int j = 0; j < asize(module_info->samplers); ++j) {
+		grain_sampler_info_t sampler_info = {
+			.name = module_info->samplers[j],
+		};
+		grain_copy_decorators(
+			archetype, module_info, sampler_info.name,
+			&sampler_info.decorators, &sampler_info.num_decorators,
+			decorator_cursor, arg_cursor
+		);
+		apush(archetype->samplers, sampler_info);
+		apush(archetype->sampler_module_names, module_info->name);
+	}
 }
 
 static void
@@ -614,7 +733,11 @@ grain_create(void) {
 	*grain = (grain_t){
 		.arena = cf_make_arena(16, 64 * 1024),
 		.dummy_mesh = cf_make_mesh(4, &(CF_VertexAttribute){}, 0, 0),
+		.fallback_texture = cf_make_texture(cf_texture_defaults(1, 1)),
 	};
+	cf_texture_update(
+		grain->fallback_texture, (uint32_t[]){ 0xFFFFFFFFu }, sizeof(uint32_t)
+	);
 
 	return grain;
 }
@@ -626,16 +749,11 @@ grain_destroy(grain_t* grain) {
 	grain_free_modules(&grain->emitters);
 	grain_free_modules(&grain->affectors);
 	grain_free_modules(&grain->renderers);
-
-	for (int i = 0; i < map_size(grain->archetypes); ++i) {
-		grain_archetype_t* archetype = grain->archetypes[i];
-		grain_cleanup_archetype(archetype);
-		cf_free(archetype);
-	}
-	map_free(grain->archetypes);
+	grain_free_archetypes(grain);
 
 	cf_destroy_arena(&grain->arena);
 	cf_destroy_mesh(grain->dummy_mesh);
+	cf_destroy_texture(grain->fallback_texture);
 	cf_free(grain);
 }
 
@@ -685,6 +803,34 @@ grain_get_affector_name(grain_affector_t* affector) {
 const char*
 grain_get_renderer_name(grain_renderer_t* renderer) {
 	return renderer != NULL ? ((grain_module_t*)renderer)->info->name : NULL;
+}
+
+// A module references its samplers by their local names; each include renames
+// them to the archetype-wide slot globals, the same way `process` is renamed.
+static void
+grain_append_sampler_renames(
+	char** source,
+	const grain_dsl_module_info_t* module_info,
+	int first_slot
+) {
+	for (int j = 0; j < asize(module_info->samplers); ++j) {
+		sfmt_append(
+			*source, "#define %s grain_sampler_%d\n",
+			module_info->samplers[j], first_slot + j
+		);
+		sfmt_append(
+			*source, "#define %s_uvrect grain_sampler_uv[%d]\n",
+			module_info->samplers[j], first_slot + j
+		);
+	}
+}
+
+static void
+grain_append_sampler_undefs(char** source, const grain_dsl_module_info_t* module_info) {
+	for (int j = 0; j < asize(module_info->samplers); ++j) {
+		sfmt_append(*source, "#undef %s_uvrect\n", module_info->samplers[j]);
+		sfmt_append(*source, "#undef %s\n", module_info->samplers[j]);
+	}
 }
 
 grain_archetype_t*
@@ -765,6 +911,45 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		goto fail;
 	}
 
+	// Slots for every module's Samplers block, in canonical order: emitters,
+	// affectors, renderer. They follow the attribute textures because CF needs
+	// sampler bindings dense from 0 with storage buffers after all samplers.
+	int num_user_samplers = 0;
+	for (int i = 0; i < spec.num_emitters; ++i) {
+		num_user_samplers += asize(((grain_module_t*)spec.emitters[i])->info->samplers);
+	}
+	for (int i = 0; i < spec.num_affectors; ++i) {
+		num_user_samplers += asize(((grain_module_t*)spec.affectors[i])->info->samplers);
+	}
+	num_user_samplers += asize(((grain_module_t*)spec.renderer)->info->samplers);
+	// The web build emulates storage buffers as textures on units 8 and up, so
+	// every real sampler has to fit below that in each stage.
+	if (num_textures + num_user_samplers > 8) {
+		grain_set_last_error(grain, "Archetype requires too many samplers");
+		goto fail;
+	}
+
+	// User-visible sampler declarations: every stage declares every slot so the
+	// storage buffer bindings stay identical across passes; unused slots are
+	// simply fed the fallback texture. The uv rect maps a slot into its atlas
+	// region ((0,0)-(1,1) for a raw texture).
+	for (int j = 0; j < num_user_samplers; ++j) {
+		sfmt_append(
+			archetype_attrs,
+			"layout(set = GRAIN_SAMPLER_SET, binding = %d) uniform sampler2D grain_sampler_%d;\n",
+			num_textures + j, j
+		);
+	}
+	if (num_user_samplers > 0) {
+		sfmt_append(
+			archetype_attrs,
+			"layout(set = GRAIN_UNIFORM_SET, binding = 1) uniform grain_sampler_uniforms {\n"
+			"\tvec4 grain_sampler_uv[%d];\n"
+			"};\n",
+			num_user_samplers
+		);
+	}
+
 	// Attribute pack/unpack
 	for (int i = 0; i < num_textures; ++i) {
 		sfmt_append(
@@ -810,12 +995,17 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(archetype_update, "#define Emitter(X)\n");
 	sappend(archetype_update, "#define Affector(X)\n");
 	sappend(archetype_update, "#define Requires(X)\n");
+	sappend(archetype_update, "#define Samplers(X)\n");
+	int sampler_slot = 0;
 	for (int i = 0; i < spec.num_emitters; ++i) {
 		grain_module_t* module = (grain_module_t*)spec.emitters[i];
 		sfmt_append(archetype_update, "#define Params(X) struct %s_%s_ModuleParams { %s };\n", "emitter", module->info->name, asize(module->info->module_params) != 0 ? "X" : "int grain_ignore;");
 		sfmt_append(archetype_update, "#define ModuleParams %s_%s_ModuleParams\n", "emitter", module->info->name);
 		sfmt_append(archetype_update, "#define process %s_%s_process\n", "emitter", module->info->name);
+		grain_append_sampler_renames(&archetype_update, module->info, sampler_slot);
 		sfmt_append(archetype_update, "#include \"emitter/%s\"\n", module->info->name);
+		grain_append_sampler_undefs(&archetype_update, module->info);
+		sampler_slot += asize(module->info->samplers);
 		sappend    (archetype_update, "#undef process\n");
 		sappend    (archetype_update, "#undef ModuleParams\n");
 		sappend    (archetype_update, "#undef Params\n");
@@ -825,7 +1015,10 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		sfmt_append(archetype_update, "#define Params(X) struct %s_%s_ModuleParams { %s };\n", "affector", module->info->name, asize(module->info->module_params) != 0 ? "X" : "int grain_ignore;");
 		sfmt_append(archetype_update, "#define ModuleParams %s_%s_ModuleParams\n", "affector", module->info->name);
 		sfmt_append(archetype_update, "#define process %s_%s_process\n", "affector", module->info->name);
+		grain_append_sampler_renames(&archetype_update, module->info, sampler_slot);
 		sfmt_append(archetype_update, "#include \"affector/%s\"\n", module->info->name);
+		grain_append_sampler_undefs(&archetype_update, module->info);
+		sampler_slot += asize(module->info->samplers);
 		sappend    (archetype_update, "#undef process\n");
 		sappend    (archetype_update, "#undef ModuleParams\n");
 		sappend    (archetype_update, "#undef Params\n");
@@ -874,8 +1067,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	// Loading system data
 	sappend    (archetype_update, "\n");
 	sappend    (archetype_update, "#ifdef CF_GLES\n");
-	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_params { uvec4 grain_system_params[]; };\n", num_textures + 0);
-	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_clocks { uvec4 grain_system_clocks[]; };\n", num_textures + 1);
+	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_params { uvec4 grain_system_params[]; };\n", num_textures + num_user_samplers + 0);
+	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_clocks { uvec4 grain_system_clocks[]; };\n", num_textures + num_user_samplers + 1);
 
 	// Load system params from the emulated buffer
 	sappend(archetype_update, "SystemParams grain_load_SystemParams(uint i) {\n");
@@ -935,8 +1128,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend    (archetype_update, "\treturn grain_unpack_SystemClock(grain_system_clocks[i * 2u], grain_system_clocks[i * 2u + 1u]);\n");
 	sappend    (archetype_update, "}\n");
 	sappend    (archetype_update, "#else\n");
-	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_params { SystemParams grain_system_params[]; };\n", num_textures + 0);
-	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_clocks { grain_SystemClock grain_system_clocks[]; };\n", num_textures + 1);
+	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_params { SystemParams grain_system_params[]; };\n", num_textures + num_user_samplers + 0);
+	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_clocks { grain_SystemClock grain_system_clocks[]; };\n", num_textures + num_user_samplers + 1);
 	sappend    (archetype_update, "SystemParams grain_load_SystemParams(uint i) {\n");
 	sappend    (archetype_update, "\treturn grain_system_params[i];\n");
 	sappend    (archetype_update, "}\n");
@@ -1020,7 +1213,12 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend    (archetype_render, "#define Renderer(X)\n");
 	sappend    (archetype_render, "#define Requires(X)\n");
 	sappend    (archetype_render, "#define Params(X)\n");
+	sappend    (archetype_render, "#define Samplers(X)\n");
+	// The renderer's slots come after every update module's
+	int renderer_first_slot = num_user_samplers - asize(render_module->info->samplers);
+	grain_append_sampler_renames(&archetype_render, render_module->info, renderer_first_slot);
 	sfmt_append(archetype_render, "#include \"renderer/%s\"\n", render_module->info->name);
+	grain_append_sampler_undefs(&archetype_render, render_module->info);
 
 	// Internal builtins come after the module so user code cannot reference them.
 	sappend    (archetype_render, "#include \"grain/internal.glsl\"\n");
@@ -1029,9 +1227,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	// SSBO-s
 	sappend    (archetype_render, "\n");
 	sappend    (archetype_render, "#ifdef CF_GLES\n");
-	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_params { uvec4 grain_system_params[]; };\n", num_textures + 0);
-	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_clocks { uvec4 grain_system_clocks[]; };\n", num_textures + 1);
-	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_draw_list { uvec4 grain_draw_list[]; };\n", num_textures + 2);
+	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_params { uvec4 grain_system_params[]; };\n", num_textures + num_user_samplers + 0);
+	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_clocks { uvec4 grain_system_clocks[]; };\n", num_textures + num_user_samplers + 1);
+	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_draw_list { uvec4 grain_draw_list[]; };\n", num_textures + num_user_samplers + 2);
 
 	// Load system params from the emulated buffer
 	sappend(archetype_render, "ModuleParams grain_load_ModuleParams(uint i) {\n");
@@ -1067,9 +1265,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend    (archetype_render, "\treturn grain_draw_list[i / 4][i % 4];\n");
 	sappend    (archetype_render, "}\n");
 	sappend    (archetype_render, "#else\n");
-	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_module_params { ModuleParams grain_system_params[]; };\n", num_textures + 0);
-	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_clocks { grain_SystemClock grain_system_clocks[]; };\n", num_textures + 1);
-	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_draw_list { uint grain_draw_list[]; };\n", num_textures + 2);
+	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_module_params { ModuleParams grain_system_params[]; };\n", num_textures + num_user_samplers + 0);
+	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_clocks { grain_SystemClock grain_system_clocks[]; };\n", num_textures + num_user_samplers + 1);
+	sfmt_append(archetype_render, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_draw_list { uint grain_draw_list[]; };\n", num_textures + num_user_samplers + 2);
 	sappend    (archetype_render, "ModuleParams grain_load_ModuleParams(uint i) {\n");
 	sappend    (archetype_render, "\treturn grain_system_params[i];\n");
 	sappend    (archetype_render, "}\n");
@@ -1154,6 +1352,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 			.first_param = asize(archetype->params),
 			.num_params = asize(module->info->module_params),
 		};
+		grain_collect_module_samplers(
+			archetype, module->info, &module_info, &decorator_cursor, &arg_cursor
+		);
 		apush(archetype->emitters, module_info);
 		for (int j = 0; j < asize(module->info->module_params); ++j) {
 			grain_dsl_var_t var = module->info->module_params[j];
@@ -1181,6 +1382,9 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 			.first_param = asize(archetype->params),
 			.num_params = asize(module->info->module_params),
 		};
+		grain_collect_module_samplers(
+			archetype, module->info, &module_info, &decorator_cursor, &arg_cursor
+		);
 		apush(archetype->affectors, module_info);
 		for (int j = 0; j < asize(module->info->module_params); ++j) {
 			grain_dsl_var_t var = module->info->module_params[j];
@@ -1208,6 +1412,10 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		.first_param = asize(archetype->params),
 		.num_params = asize(render_module->info->module_params),
 	};
+	grain_collect_module_samplers(
+		archetype, render_module->info, &archetype->renderer,
+		&decorator_cursor, &arg_cursor
+	);
 	for (int j = 0; j < asize(render_module->info->module_params); ++j) {
 		grain_dsl_var_t var = render_module->info->module_params[j];
 
@@ -1244,6 +1452,7 @@ grain_inspect_archetype(grain_archetype_t* archetype) {
 		.num_affectors = asize(archetype->affectors),
 		.renderer = archetype->renderer,
 		.params = archetype->params,
+		.samplers = archetype->samplers,
 	};
 }
 
@@ -1390,6 +1599,69 @@ grain_migrate_ssbo(
 	ssbo->dirty = true;
 }
 
+static CK_DYNA grain_pool_sampler_t*
+grain_capture_samplers(grain_archetype_t* archetype) {
+	CK_DYNA grain_pool_sampler_t* bindings = NULL;
+	for (int i = 0; i < asize(archetype->samplers); ++i) {
+		apush(bindings, ((grain_pool_sampler_t){
+			.module_name = archetype->sampler_module_names[i],
+			.name = archetype->samplers[i].name,
+		}));
+	}
+	return bindings;
+}
+
+// Rebinds every sampler slot on the pool material. Every declared slot must
+// be fed (CF asserts on a missing one) so unbound slots get the fallback.
+// Material entries persist across passes; nothing per-frame happens here.
+static void
+grain_apply_sampler_bindings(grain_pool_t* pool) {
+	int num_samplers = asize(pool->sampler_bindings);
+	if (num_samplers == 0) { return; }
+
+	// The archetype caps num_textures + samplers at 8
+	float uv[8 * 4];
+	for (int i = 0; i < num_samplers; ++i) {
+		grain_pool_sampler_t* slot = &pool->sampler_bindings[i];
+
+		char name[32];
+		snprintf(name, sizeof(name), "grain_sampler_%d", i);
+		CF_Texture texture = slot->bound
+			? slot->binding.texture
+			: pool->grain->fallback_texture;
+		if (slot->bound && slot->binding.sampler.id != 0) {
+			cf_material_set_texture_vs_sampler(
+				pool->material, name, texture, slot->binding.sampler
+			);
+			cf_material_set_texture_fs_sampler(
+				pool->material, name, texture, slot->binding.sampler
+			);
+		} else {
+			cf_material_set_texture_vs(pool->material, name, texture);
+			cf_material_set_texture_fs(pool->material, name, texture);
+		}
+
+		float u0 = slot->binding.uv_min[0];
+		float v0 = slot->binding.uv_min[1];
+		float u1 = slot->binding.uv_max[0];
+		float v1 = slot->binding.uv_max[1];
+		if (!slot->bound || (u0 == 0.f && v0 == 0.f && u1 == 0.f && v1 == 0.f)) {
+			u0 = 0.f; v0 = 0.f; u1 = 1.f; v1 = 1.f;
+		}
+		uv[i * 4 + 0] = u0;
+		uv[i * 4 + 1] = v0;
+		uv[i * 4 + 2] = u1;
+		uv[i * 4 + 3] = v1;
+	}
+
+	cf_material_set_uniform_vs(
+		pool->material, "grain_sampler_uv", uv, CF_UNIFORM_TYPE_FLOAT4, num_samplers
+	);
+	cf_material_set_uniform_fs(
+		pool->material, "grain_sampler_uv", uv, CF_UNIFORM_TYPE_FLOAT4, num_samplers
+	);
+}
+
 static void
 grain_make_pool_canvases(grain_pool_t* pool) {
 	grain_archetype_t* archetype = pool->opts.archetype;
@@ -1434,6 +1706,29 @@ grain_reconcile_pool(grain_pool_t* pool) {
 	afree(pool->render_layout.slots);
 	pool->update_layout = new_update;
 	pool->render_layout = new_render;
+
+	// Migrate sampler bindings by (module, name): a dropped slot loses its
+	// binding, a re-added one starts on the fallback. Re-apply unconditionally
+	// since slot numbering may have shifted; stale grain_sampler_<j> entries on
+	// the material are ignored by CF.
+	CK_DYNA grain_pool_sampler_t* new_samplers = grain_capture_samplers(archetype);
+	for (int i = 0; i < asize(new_samplers); ++i) {
+		for (int j = 0; j < asize(pool->sampler_bindings); ++j) {
+			const grain_pool_sampler_t* old = &pool->sampler_bindings[j];
+			if (
+				old->module_name == new_samplers[i].module_name
+				&&
+				old->name == new_samplers[i].name  // interned
+			) {
+				new_samplers[i].binding = old->binding;
+				new_samplers[i].bound = old->bound;
+				break;
+			}
+		}
+	}
+	afree(pool->sampler_bindings);
+	pool->sampler_bindings = new_samplers;
+	grain_apply_sampler_bindings(pool);
 
 	// If attribute layout changed, reset all particles
 	if (pool->attr_layout_hash != archetype->attr_layout_hash) {
@@ -1491,6 +1786,8 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 	pool->material = cf_make_material();
 	cf_material_set_uniform_vs(pool->material, "grain_pool_size", &pool_size, CF_UNIFORM_TYPE_INT, 1);
 	cf_material_set_uniform_fs(pool->material, "grain_pool_size", &pool_size, CF_UNIFORM_TYPE_INT, 1);
+	pool->sampler_bindings = grain_capture_samplers(opts.archetype);
+	grain_apply_sampler_bindings(pool);
 	// TODO: allow override
 	CF_RenderState render_state = cf_render_state_defaults();
 	render_state.primitive_type = CF_PRIMITIVE_TYPE_TRIANGLESTRIP;
@@ -1506,6 +1803,7 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 
 void
 grain_destroy_pool(grain_pool_t* pool) {
+	afree(pool->sampler_bindings);
 	afree(pool->update_layout.slots);
 	afree(pool->render_layout.slots);
 	cf_free(pool->clocks);
@@ -1793,6 +2091,18 @@ grain_set_renderer_parameter(
 
 	char* render_params = grain_index_ssbo(&pool->render_ssbo, archetype->render_size, index);
 	memcpy(render_params + param_offset, value, param_size);
+}
+
+void
+grain_set_texture(grain_pool_t* pool, int sampler_index, grain_texture_binding_t binding) {
+	grain_reconcile_pool(pool);
+	if (sampler_index < 0 || sampler_index >= asize(pool->sampler_bindings)) {
+		return;
+	}
+
+	pool->sampler_bindings[sampler_index].binding = binding;
+	pool->sampler_bindings[sampler_index].bound = binding.texture.id != 0;
+	grain_apply_sampler_bindings(pool);
 }
 
 void

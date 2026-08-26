@@ -19,6 +19,8 @@ typedef struct {
 	CK_DYNA grain_dsl_var_t* module_params;
 	CK_DYNA grain_decorator_t* decorators;
 	CK_DYNA grain_decorator_arg_t* decorator_args;
+	//! Interned names from the Samplers block, in declaration order
+	CK_DYNA const char** samplers;
 } grain_dsl_module_info_t;
 
 typedef struct {
@@ -29,8 +31,16 @@ typedef struct {
 	CF_ShaderBytecode render_frag_bytecode;
 } grain_dsl_archetype_shaders_t;
 
+// `samplers` (scanned from the Samplers block, not owned) is declared to the
+// inspect compile so the module body can reference them, and reflected sampler
+// declarations outside the list are rejected.
 grain_dsl_module_info_t*
-grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage);
+grain_dsl_parse_module(
+	grain_t* grain,
+	const char* source,
+	CSPV_Stage stage,
+	CK_DYNA const char** samplers
+);
 
 bool
 grain_dsl_compile_archetype(
@@ -54,6 +64,7 @@ grain_dsl_free_module_info(grain_dsl_module_info_t* module_info) {
 	afree(module_info->module_params);
 	afree(module_info->decorators);
 	afree(module_info->decorator_args);
+	afree(module_info->samplers);
 	cf_free(module_info);
 }
 
