@@ -1743,13 +1743,13 @@ update(void) {
 				ImGui_PushIDInt(i);
 
 				const grain_module_info_t* module = &archetype_info.emitters[i];
-				ImGui_SeparatorText(module->name);
+				if (ImGui_CollapsingHeader(module->name, 0)) {
+					show_module_params(module, &archetype_info);
+					show_module_samplers(GRAIN_MODULE_EMITTER, i, module, &archetype_info);
 
-				show_module_params(module, &archetype_info);
-				show_module_samplers(GRAIN_MODULE_EMITTER, i, module, &archetype_info);
-
-				if (ImGui_Button("Remove")) {
-					remove_index = i;
+					if (ImGui_Button("Remove")) {
+						remove_index = i;
+					}
 				}
 
 				ImGui_PopID();
@@ -1781,13 +1781,14 @@ update(void) {
 				ImGui_PushIDInt(i);
 
 				const grain_module_info_t* module = &archetype_info.affectors[i];
-				ImGui_SeparatorText(module->name);
 
-				show_module_params(module, &archetype_info);
-				show_module_samplers(GRAIN_MODULE_AFFECTOR, i, module, &archetype_info);
+				if (ImGui_CollapsingHeader(module->name, 0)) {
+					show_module_params(module, &archetype_info);
+					show_module_samplers(GRAIN_MODULE_AFFECTOR, i, module, &archetype_info);
 
-				if (ImGui_Button("Remove")) {
-					remove_index = i;
+					if (ImGui_Button("Remove")) {
+						remove_index = i;
+					}
 				}
 
 				ImGui_PopID();
