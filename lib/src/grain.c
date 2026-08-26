@@ -108,6 +108,8 @@ struct grain_pool_s {
 
 	// Parallel to the archetype's sampler slots
 	CK_DYNA grain_pool_sampler_t* sampler_bindings;
+
+	CF_RenderState render_state;
 };
 
 typedef struct {
@@ -1788,10 +1790,7 @@ grain_create_pool(grain_t* grain, grain_pool_opts_t opts) {
 	cf_material_set_uniform_fs(pool->material, "grain_pool_size", &pool_size, CF_UNIFORM_TYPE_INT, 1);
 	pool->sampler_bindings = grain_capture_samplers(opts.archetype);
 	grain_apply_sampler_bindings(pool);
-	// TODO: allow override
-	CF_RenderState render_state = cf_render_state_defaults();
-	render_state.primitive_type = CF_PRIMITIVE_TYPE_TRIANGLESTRIP;
-	cf_material_set_render_state(pool->material, render_state);
+	pool->render_state = grain_render_state_defaults();
 
 	pool->systems = cf_alloc(sizeof(grain_system_t) * opts.max_systems);
 	memset(pool->systems, 0, sizeof(grain_system_t) * opts.max_systems);
@@ -1852,6 +1851,30 @@ grain_get_pool(grain_system_t* system) {
 grain_pool_opts_t
 grain_get_pool_opts(grain_pool_t* pool) {
 	return pool->opts;
+}
+
+CF_RenderState
+grain_render_state_defaults(void) {
+	CF_RenderState state = cf_render_state_defaults();
+	state.primitive_type = CF_PRIMITIVE_TYPE_TRIANGLESTRIP;
+	state.blend.rgb_src_blend_factor = CF_BLENDFACTOR_ONE;
+	state.blend.rgb_dst_blend_factor = CF_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+	state.blend.alpha_src_blend_factor = CF_BLENDFACTOR_ONE;
+	state.blend.alpha_dst_blend_factor = CF_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+	state.depth_compare = CF_COMPARE_FUNCTION_LESS_THAN_OR_EQUAL;
+	state.depth_write_enabled = false;
+	return state;
+}
+
+void
+grain_set_render_state(grain_pool_t* pool, CF_RenderState render_state) {
+	render_state.primitive_type = CF_PRIMITIVE_TYPE_TRIANGLESTRIP;
+	pool->render_state = render_state;
+}
+
+CF_RenderState
+grain_get_render_state(grain_pool_t* pool) {
+	return pool->render_state;
 }
 
 static void
@@ -1948,6 +1971,11 @@ grain_update_pool(grain_t* grain, grain_pool_t* pool) {
 		cf_material_set_texture_vs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
 		cf_material_set_texture_fs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
 	}
+	// The update pass overwrites attribute texels verbatim: it must never see
+	// the user's render state, whose blending would corrupt the simulation.
+	CF_RenderState update_state = cf_render_state_defaults();
+	update_state.primitive_type = CF_PRIMITIVE_TYPE_TRIANGLESTRIP;
+	cf_material_set_render_state(pool->material, update_state);
 	cf_apply_shader(pool->opts.archetype->shaders.update_shader, pool->material);
 	CF_StorageBuffer fs_buffers[] = {
 		pool->update_ssbo.gpu,
@@ -2180,6 +2208,7 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool, CF_M3x2 transform) {
 	grain_transform_to_mat4(transform, transform_mat4);
 	cf_material_set_uniform_vs(pool->material, "grain_transform", transform_mat4, CF_UNIFORM_TYPE_MAT4, 1);
 
+	cf_material_set_render_state(pool->material, pool->render_state);
 	cf_apply_shader(pool->opts.archetype->shaders.render_shader, pool->material);
 	CF_StorageBuffer storage_buffers[] = {
 		pool->render_ssbo.gpu,

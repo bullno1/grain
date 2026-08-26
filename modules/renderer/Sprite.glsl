@@ -34,8 +34,9 @@ void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 Varying(2) vec2 v_uv;
 
 void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
-	grain_Color = texture(image, atlas_uv(image_uvrect, v_uv));
-	grain_Color.a *= clamp(particle.lifetime, 0.0, 1.0);
+	// The atlas is premultiplied, so fading scales the whole color
+	grain_Color = texture(image, atlas_uv(image_uvrect, v_uv))
+		* clamp(particle.lifetime, 0.0, 1.0);
 }
 
 #endif

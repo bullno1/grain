@@ -233,6 +233,38 @@ grain_get_pool(grain_system_t* system);
 grain_pool_opts_t
 grain_get_pool_opts(grain_pool_t* pool);
 
+/**
+ * Grain's default render state for pools.
+ *
+ * * Premultiplied-alpha "over" blending, matching both CF's own draw pipeline
+ *   and the premultiplied pixels of its sprite atlas
+ * * Depth test is LESS_EQUAL
+ * * Depth write is off
+ * * No culling
+ *
+ * When the target has a depth buffer, opaque geometry occludes particles
+ * while particles never occlude anything.
+ *
+ * Under the premultiplied convention additive blending is a shader decision,
+ * not a state change: a renderer module that pushes alpha toward zero while
+ * keeping color emits additively, and can vary this per particle.
+ */
+CF_RenderState
+grain_render_state_defaults(void);
+
+/**
+ * Override the render state of a pool.
+ *
+ * Start from @ref grain_render_state_defaults and tweak.
+ * primitive_type is owned by grain and is overwritten.
+ */
+void
+grain_set_render_state(grain_pool_t* pool, CF_RenderState render_state);
+
+//! The state last set through @ref grain_set_render_state, or the defaults
+CF_RenderState
+grain_get_render_state(grain_pool_t* pool);
+
 void
 grain_destroy_pool(grain_pool_t* pool);
 

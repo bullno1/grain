@@ -26,8 +26,10 @@ void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 #elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT
 
 void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
-	grain_Color = unpackUnorm4x8(params.color);
-	grain_Color.a = clamp(particle.lifetime, 0.0, 1.0);
+	// The color param is straight alpha while blending is premultiplied
+	vec4 color = unpackUnorm4x8(params.color);
+	grain_Color = vec4(color.rgb * color.a, color.a)
+		* clamp(particle.lifetime, 0.0, 1.0);
 }
 
 #endif
