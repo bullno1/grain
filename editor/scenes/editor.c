@@ -131,6 +131,15 @@ static save_prompt_result_t save_prompt_result = SAVE_PROMPT_CANCEL;
 // Result of the last do_save_system run, for callers that chain on it
 static bool save_flow_succeeded = false;
 
+// Menu items and shortcut keys funnel into one of these each frame
+typedef enum {
+	CMD_NONE,
+	CMD_NEW,
+	CMD_OPEN,
+	CMD_SAVE,
+	CMD_SAVE_AS,
+} editor_command_t;
+
 // }}}
 
 // Logging {{{
@@ -1231,26 +1240,27 @@ update(void) {
 	cf_clear_canvas(cf_app_get_canvas());
 
 	bool should_rebuild_archetype = false;
+	editor_command_t pending_command = CMD_NONE;
 
 	ImGui_DockSpaceOverViewportEx(0, NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
 
 // Menu bar {{{
 	if (ImGui_BeginMainMenuBar()) {
 		if (ImGui_BeginMenu("File")) {
-			if (ImGui_MenuItem("New")) {
-				start_modal_action(new_system);
+			if (ImGui_MenuItemEx("New", "Ctrl+N", false, true)) {
+				pending_command = CMD_NEW;
 			}
 
-			if (ImGui_MenuItem("Open")) {
-				start_modal_action(open_system);
+			if (ImGui_MenuItemEx("Open", "Ctrl+O", false, true)) {
+				pending_command = CMD_OPEN;
 			}
 
-			if (ImGui_MenuItem("Save")) {
-				start_modal_action(do_save_system, false);
+			if (ImGui_MenuItemEx("Save", "Ctrl+S", false, true)) {
+				pending_command = CMD_SAVE;
 			}
 
-			if (ImGui_MenuItem("Save as")) {
-				start_modal_action(do_save_system, true);
+			if (ImGui_MenuItemEx("Save as", "Ctrl+Shift+S", false, true)) {
+				pending_command = CMD_SAVE_AS;
 			}
 
 			ImGui_Separator();
@@ -1286,6 +1296,40 @@ update(void) {
 			ImGui_EndMenu();
 		}
 		ImGui_EndMainMenuBar();
+	}
+// }}}
+
+// Commands {{{
+	if (ImGui_Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, ImGuiInputFlags_RouteGlobal)) {
+		pending_command = CMD_NEW;
+	}
+	if (ImGui_Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, ImGuiInputFlags_RouteGlobal)) {
+		pending_command = CMD_OPEN;
+	}
+	if (ImGui_Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, ImGuiInputFlags_RouteGlobal)) {
+		pending_command = CMD_SAVE;
+	}
+	if (ImGui_Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S, ImGuiInputFlags_RouteGlobal)) {
+		pending_command = CMD_SAVE_AS;
+	}
+
+	// Menu items and shortcuts meet here so both trigger the same handler.
+	// start_modal_action already ignores commands while one is in progress.
+	switch (pending_command) {
+		case CMD_NEW:
+			start_modal_action(new_system);
+			break;
+		case CMD_OPEN:
+			start_modal_action(open_system);
+			break;
+		case CMD_SAVE:
+			start_modal_action(do_save_system, false);
+			break;
+		case CMD_SAVE_AS:
+			start_modal_action(do_save_system, true);
+			break;
+		case CMD_NONE:
+			break;
 	}
 // }}}
 
