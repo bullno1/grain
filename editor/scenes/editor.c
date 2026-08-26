@@ -745,9 +745,17 @@ recreate_pool(grain_archetype_info_t* archetype_info) {
 
 // Editor widgets {{{
 
+static const char*
+module_list_name_getter(void* user_data, int idx) {
+	// Map keys are uint64_t-widened interned pointers so the key array cannot
+	// be reinterpreted as const char*[] on 32-bit targets (wasm).
+	CK_MAP(module_meta_t*) module_map = user_data;
+	return (const char*)(uintptr_t)map_keys(module_map)[idx];
+}
+
 static bool
 show_module_list(CK_MAP(module_meta_t*) module_map, const char* label, int* current_item) {
-	return ImGui_ComboChar(label, current_item, (const char**)map_keys(module_map), map_size(module_map));
+	return ImGui_ComboCallback(label, current_item, module_list_name_getter, module_map, map_size(module_map));
 }
 
 static void
