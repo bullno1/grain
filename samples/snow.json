@@ -1,0 +1,107 @@
+{
+	"grain_version": 1,
+	"name": "Effect",
+	"emission_rate": 168.0,
+	"pool": {
+		"max_systems": 1,
+		"max_emission_rate": 512.0,
+		"lifetime_budget": 16.0,
+		"max_burst_size": 256
+	},
+	"modules": [
+		{
+			"kind": "emitter",
+			"name": "Box",
+			"path": "Box.glsl",
+			"source": "Emitter(Box)\n\nRequires(\n\tvec2 position;\n\tvec2 velocity;\n)\n\nParams(\n\t@position\n\tvec2 position;\n\n\t@extent(at = position)\n\tvec2 size;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.position = params.position + (vec2(rand(), rand()) - 0.5) * params.size;\n\tparticle.velocity = vec2(0.0);\n}\n"
+		},
+		{
+			"kind": "emitter",
+			"name": "Lifetime",
+			"path": "Lifetime.glsl",
+			"source": "Emitter(Lifetime)\n\nRequires(\n\tfloat lifetime;\n)\n\nParams(\n\t@range(min=0, step=0.1)\n\tfloat min_lifetime;\n\tfloat max_lifetime;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.lifetime = mix(params.min_lifetime, params.max_lifetime, rand());\n}\n"
+		},
+		{
+			"kind": "affector",
+			"name": "Wind",
+			"path": "Wind.glsl",
+			"source": "Affector(Wind)\n\nRequires(\n\tvec2 velocity;\n)\n\nParams(\n\t@vector(scale = 1)\n\tvec2 velocity;\n\n\t@range(min = 0, step = 0.1)\n\tfloat drag;\n\n\t@range(min = 0, max = 1, step = 0.01)\n\tfloat gustiness;\n\t@range(min = 0, step = 0.1)\n\tfloat gust_frequency;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// rand() is reseeded per particle each frame, so this is a stable phase\n\tfloat phase = rand() * 6.2831853;\n\tfloat gust = sin(ctx.time * params.gust_frequency + phase) * 0.6\n\t\t\t\t\t\t + sin(ctx.time * params.gust_frequency * 2.33 + phase * 1.7) * 0.4;\n\tvec2 wind = params.velocity * (1.0 + params.gustiness * gust);\n\tparticle.velocity += (wind - particle.velocity) * min(params.drag * ctx.dt, 1.0);\n}\n"
+		},
+		{
+			"kind": "affector",
+			"name": "Flutter",
+			"path": "Flutter.glsl",
+			"source": "Affector(Flutter)\n\nRequires(\n\tvec2 velocity;\n)\n\nParams(\n\t@range(min = 0, step = 0.1)\n\tfloat strength;\n\n\t@range(min = 0, step = 0.1)\n\tfloat frequency;\n\n\t@range(min = 0, max = 1, step = 0.01)\n\tfloat variation;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// rand() is reseeded per particle each frame: stable phase/rate per flake\n\tfloat phase = rand() * 6.2831853;\n\tfloat freq\t= params.frequency * mix(1.0, 0.5 + rand(), params.variation);\n\tfloat amp\t = params.strength\t* mix(1.0, 0.5 + rand(), params.variation);\n\tparticle.velocity.x += sin(ctx.time * freq + phase) * amp * ctx.dt;\n}\n"
+		},
+		{
+			"kind": "affector",
+			"name": "Integrate",
+			"path": "Integrate.glsl",
+			"source": "Affector(Integrate)\n\nRequires(\n\tvec2 position;\n\tvec2 velocity;\n)\n\nParams(\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.position += particle.velocity * ctx.dt;\n}\n"
+		},
+		{
+			"kind": "renderer",
+			"name": "Sprite",
+			"path": "Sprite.glsl",
+			"source": "Renderer(Sprite)\n\nRequires(\n\tvec2 position;\n\tfloat lifetime;\n)\n\nParams(\n\t@range(step=0.1)\n\tvec2 size;\n)\n\nSamplers(\n\tsampler2D image;\n)\n\n#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX\n\nVarying(2) vec2 v_uv;\n\nvoid process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tif (particle.lifetime > 0.0) {\n\t\tvec2 corner = quad();\n\t\t// The atlas is y-down while the quad is y-up\n\t\tv_uv = vec2(corner.x + 0.5, 0.5 - corner.y);\n\t\tgl_Position = grain_transform * vec4(particle.position + corner * params.size, 0.0, 1.0);\n\t} else {\n\t\tcull();\n\t}\n}\n\n#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT\n\nVarying(2) vec2 v_uv;\n\nvoid process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// The atlas is premultiplied, so fading scales the whole color\n\tgrain_Color = texture(image, atlas_uv(image_uvrect, v_uv))\n\t\t* clamp(particle.lifetime, 0.0, 1.0);\n}\n\n#endif\n"
+		}
+	],
+	"archetype": {
+		"emitters": [
+			{
+				"module": "Box",
+				"params": {
+					"position": [
+						-34.000008,
+						455.99997
+					],
+					"size": [
+						1155.0,
+						42.0
+					]
+				}
+			},
+			{
+				"module": "Lifetime",
+				"params": {
+					"min_lifetime": 0.0,
+					"max_lifetime": 11.0
+				}
+			}
+		],
+		"affectors": [
+			{
+				"module": "Wind",
+				"params": {
+					"velocity": [
+						1.0,
+						-63.0
+					],
+					"drag": 0.5,
+					"gustiness": 0.75,
+					"gust_frequency": 8.8
+				}
+			},
+			{
+				"module": "Flutter",
+				"params": {
+					"strength": 51.7,
+					"frequency": 6.3,
+					"variation": 0.86
+				}
+			},
+			{
+				"module": "Integrate"
+			}
+		],
+		"renderer": {
+			"module": "Sprite",
+			"params": {
+				"size": [
+					6.0,
+					6.0
+				]
+			}
+		}
+	}
+}

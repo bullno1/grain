@@ -1,0 +1,120 @@
+{
+	"grain_version": 1,
+	"name": "Effect",
+	"emission_rate": 245.0,
+	"pool": {
+		"max_systems": 1,
+		"max_emission_rate": 512.0,
+		"lifetime_budget": 16.0,
+		"max_burst_size": 256
+	},
+	"modules": [
+		{
+			"kind": "emitter",
+			"name": "Point",
+			"path": "/home/bullno1/Projects/grain/modules/emitters/Point.glsl",
+			"source": "Emitter(Point)\n\nRequires(\n\tvec2 position;\n\tvec2 velocity;\n)\n\nParams(\n\t@position\n\tvec2 position;\n\n\t@range(min=0, step=0.1)\n\tfloat min_speed;\n\tfloat max_speed;\n\n\t@range(step = 0.0174533)\n\t@arc(at=position, to=max_angle, inner=min_speed, outer=max_speed)\n\tfloat min_angle;\n\t@range(step = 0.0174533)\n\tfloat max_angle;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.position = params.position;\n\tfloat speed = mix(params.min_speed, params.max_speed, rand());\n\tfloat angle = mix(params.min_angle, params.max_angle, rand());\n\tparticle.velocity = vec2(cos(angle), sin(angle)) * speed;\n}\n"
+		},
+		{
+			"kind": "emitter",
+			"name": "Lifetime",
+			"path": "/home/bullno1/Projects/grain/modules/emitters/Lifetime.glsl",
+			"source": "Emitter(Lifetime)\n\nRequires(\n\tfloat lifetime;\n)\n\nParams(\n\t@range(min=0, step=0.1)\n\tfloat min_lifetime;\n\tfloat max_lifetime;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.lifetime = mix(params.min_lifetime, params.max_lifetime, rand());\n}\n"
+		},
+		{
+			"kind": "affector",
+			"name": "Age",
+			"path": "/home/bullno1/Projects/grain/modules/affectors/Age.glsl",
+			"source": "Affector(Age)\n\nRequires(\n\tfloat lifetime;\n)\n\nParams(\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.lifetime -= ctx.dt;\n}\n"
+		},
+		{
+			"kind": "affector",
+			"name": "Wind",
+			"path": "/home/bullno1/Projects/grain/modules/affectors/Wind.glsl",
+			"source": "Affector(Wind)\n\nRequires(\n\tvec2 velocity;\n)\n\nParams(\n\t@vector(scale = 1)\n\tvec2 velocity;\n\n\t@range(min = 0, step = 0.1)\n\tfloat drag;\n\n\t@range(min = 0, max = 1, step = 0.01)\n\tfloat gustiness;\n\t@range(min = 0, step = 0.1)\n\tfloat gust_frequency;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// rand() is reseeded per particle each frame, so this is a stable phase\n\tfloat phase = rand() * 6.2831853;\n\tfloat gust = sin(ctx.time * params.gust_frequency + phase) * 0.6\n\t					 + sin(ctx.time * params.gust_frequency * 2.33 + phase * 1.7) * 0.4;\n\tvec2 wind = params.velocity * (1.0 + params.gustiness * gust);\n\tparticle.velocity += (wind - particle.velocity) * min(params.drag * ctx.dt, 1.0);\n}\n"
+		},
+		{
+			"kind": "affector",
+			"name": "Flutter",
+			"path": "/home/bullno1/Projects/grain/modules/affectors/Flutter.glsl",
+			"source": "Affector(Flutter)\n\nRequires(\n\tvec2 velocity;\n)\n\nParams(\n\t@range(min = 0, step = 0.1)\n\tfloat strength;\n\n\t@range(min = 0, step = 0.1)\n\tfloat frequency;\n\n\t@range(min = 0, max = 1, step = 0.01)\n\tfloat variation;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// rand() is reseeded per particle each frame: stable phase/rate per flake\n\tfloat phase = rand() * 6.2831853;\n\tfloat freq	= params.frequency * mix(1.0, 0.5 + rand(), params.variation);\n\tfloat amp	 = params.strength	* mix(1.0, 0.5 + rand(), params.variation);\n\tparticle.velocity.x += sin(ctx.time * freq + phase) * amp * ctx.dt;\n}\n"
+		},
+		{
+			"kind": "affector",
+			"name": "Integrate",
+			"path": "/home/bullno1/Projects/grain/modules/affectors/Integrate.glsl",
+			"source": "Affector(Integrate)\n\nRequires(\n\tvec2 position;\n\tvec2 velocity;\n)\n\nParams(\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.position += particle.velocity * ctx.dt;\n}\n"
+		},
+		{
+			"kind": "renderer",
+			"name": "Flame",
+			"path": "/home/bullno1/Projects/grain/modules/renderer/Flame.glsl",
+			"source": "\u0010ZOVUU\u0000\u0000\u0010ZOVUU\u0000\u0000\nRequires(\n\tvec2 position;\n\tfloat lifetime;\n)\n\nParams(\n\t@range(step = 0.1)\n\tvec2 size;\n\n\t@range(min = 0, step = 0.1)\n\tfloat duration;\n\n\t@range(min = 0, max = 2, step = 0.01)\n\tfloat end_scale;\n\n\t@color\n\tuint hot_color;\n\t@color\n\tuint cool_color;\n)\n\nSamplers(\n\tsampler2D image;\n)\n\n#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX\n\nVarying(2) vec2 v_uv;\nVarying(3) float v_t;\n\nvoid process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tif (particle.lifetime > 0.0) {\n\t\t// Normalized age, assuming lifetimes are around `duration`\n\t\tv_t = clamp(1.0 - particle.lifetime / params.duration, 0.0, 1.0);\n\t\tvec2 corner = quad();\n\t\t// The atlas is y-down while the quad is y-up\n\t\tv_uv = vec2(corner.x + 0.5, 0.5 - corner.y);\n\t\tvec2 size = params.size * mix(1.0, params.end_scale, v_t);\n\t\tgl_Position = grain_transform * vec4(particle.position + corner * size, 0.0, 1.0);\n\t} else {\n\t\tcull();\n\t}\n}\n\n#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT\n\nVarying(2) vec2 v_uv;\nVarying(3) float v_t;\n\nvoid process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tvec4 tint = mix(unpackUnorm4x8(params.hot_color), unpackUnorm4x8(params.cool_color), v_t);\n\tgrain_Color = texture(image, atlas_uv(image_uvrect, v_uv)) * tint;\n\tgrain_Color.a *= clamp(particle.lifetime * 4.0, 0.0, 1.0);\n}\n\n#endif\n"
+		}
+	],
+	"archetype": {
+		"emitters": [
+			{
+				"module": "Point",
+				"params": {
+					"position": [
+						0.0,
+						0.0
+					],
+					"min_speed": 30.0,
+					"max_speed": 80.0,
+					"min_angle": 1.253,
+					"max_angle": 1.87
+				}
+			},
+			{
+				"module": "Lifetime",
+				"params": {
+					"min_lifetime": 0.3,
+					"max_lifetime": 3.0
+				}
+			}
+		],
+		"affectors": [
+			{
+				"module": "Age"
+			},
+			{
+				"module": "Wind",
+				"params": {
+					"velocity": [
+						0.0,
+						60.0
+					],
+					"drag": 2.0,
+					"gustiness": 0.38,
+					"gust_frequency": 15.1
+				}
+			},
+			{
+				"module": "Flutter",
+				"params": {
+					"strength": 200.0,
+					"frequency": 8.7,
+					"variation": 0.719
+				}
+			},
+			{
+				"module": "Integrate"
+			}
+		],
+		"renderer": {
+			"module": "Flame",
+			"params": {
+				"size": [
+					16.0,
+					16.0
+				],
+				"duration": 2.3,
+				"end_scale": 0.0,
+				"hot_color": 4278255607,
+				"cool_color": 4278190335
+			}
+		}
+	}
+}
