@@ -25,8 +25,5 @@ void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	vec2 n = d / dist;
 	// Project back onto the surface so particles never render inside
 	particle.position = params.position + n * params.radius;
-	float vn = dot(particle.velocity, n);
-	if (vn < 0.0) {
-		particle.velocity -= (1.0 + params.bounciness) * vn * n;
-	}
+	particle.velocity = deflect(particle.velocity, n, params.bounciness);
 }

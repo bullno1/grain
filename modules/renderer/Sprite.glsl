@@ -21,7 +21,7 @@ Varying(2) vec2 v_uv;
 void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	if (particle.lifetime > 0.0) {
 		vec2 corner = quad();
-		v_uv = uv_quad(corner);
+		v_uv = uv_quad();
 		gl_Position = grain_transform * vec4(particle.position + corner * params.size, 0.0, 1.0);
 	} else {
 		cull();

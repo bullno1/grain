@@ -26,16 +26,10 @@ void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	if (overlap.x < overlap.y) {
 		float s = d.x < 0.0 ? -1.0 : 1.0;
 		particle.position.x = params.position.x + s * half_size.x;
-		float vn = particle.velocity.x * s;
-		if (vn < 0.0) {
-			particle.velocity.x -= (1.0 + params.bounciness) * vn * s;
-		}
+		particle.velocity = deflect(particle.velocity, vec2(s, 0.0), params.bounciness);
 	} else {
 		float s = d.y < 0.0 ? -1.0 : 1.0;
 		particle.position.y = params.position.y + s * half_size.y;
-		float vn = particle.velocity.y * s;
-		if (vn < 0.0) {
-			particle.velocity.y -= (1.0 + params.bounciness) * vn * s;
-		}
+		particle.velocity = deflect(particle.velocity, vec2(0.0, s), params.bounciness);
 	}
 }

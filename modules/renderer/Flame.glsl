@@ -35,7 +35,7 @@ void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 		// Normalized age, assuming lifetimes are around `duration`
 		v_t = clamp(1.0 - particle.lifetime / params.duration, 0.0, 1.0);
 		vec2 corner = quad();
-		v_uv = uv_quad(corner);
+		v_uv = uv_quad();
 		vec2 size = params.size * mix(1.0, params.end_scale, v_t);
 		gl_Position = grain_transform * vec4(particle.position + corner * size, 0.0, 1.0);
 	} else {

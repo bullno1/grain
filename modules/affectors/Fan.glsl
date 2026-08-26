@@ -32,7 +32,7 @@ void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	float mid = (params.min_angle + params.max_angle) * 0.5;
 	float half_spread = (params.max_angle - params.min_angle) * 0.5;
 	vec2 dir = d / dist;
-	if (half_spread < 3.14159265 && dot(dir, vec2(cos(mid), sin(mid))) < cos(half_spread)) {
+	if (half_spread < PI && dot(dir, unit_vec(mid)) < cos(half_spread)) {
 			return;
 	}
 

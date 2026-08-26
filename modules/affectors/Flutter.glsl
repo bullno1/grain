@@ -17,7 +17,7 @@ Params(
 
 void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	// rand() is reseeded per particle each frame: stable phase/rate per flake
-	float phase = rand() * 6.2831853;
+	float phase = rand() * TAU;
 	float freq  = params.frequency * mix(1.0, 0.5 + rand(), params.variation);
 	float amp   = params.strength  * mix(1.0, 0.5 + rand(), params.variation);
 	particle.velocity.x += sin(ctx.time * freq + phase) * amp * ctx.dt;

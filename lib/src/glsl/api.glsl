@@ -55,9 +55,33 @@ struct Ctx {
 	float time;
 };
 
+const float PI  = 3.14159265358979;
+const float TAU = 6.28318530717959;
+
 // Maps a unit UV into a binding's atlas rect
 vec2 atlas_uv(vec4 uvrect, vec2 uv) {
 	return mix(uvrect.xy, uvrect.zw, uv);
+}
+
+vec2 unit_vec(float angle) {
+	return vec2(cos(angle), sin(angle));
+}
+
+vec2 rotate(vec2 v, float angle) {
+	float c = cos(angle);
+	float s = sin(angle);
+	return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
+}
+
+// Converts a straight-alpha color for premultiplied-alpha blending
+vec4 premultiply(vec4 color) {
+	return vec4(color.rgb * color.a, color.a);
+}
+
+// Bounces velocity off a surface with normal n, only when moving into it
+vec2 deflect(vec2 velocity, vec2 n, float bounciness) {
+	float vn = dot(velocity, n);
+	return vn < 0.0 ? velocity - (1.0 + bounciness) * vn * n : velocity;
 }
 
 uint grain_rng_state;
@@ -73,6 +97,10 @@ float rand() {
 	return float(grain_rng_state) * (1.0 / 4294967296.0);
 }
 
+float rand_range(float lo, float hi) {
+	return mix(lo, hi, rand());
+}
+
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
 
 vec2 quad() {
@@ -81,8 +109,9 @@ vec2 quad() {
 }
 
 // Unit UV for the current quad corner, y-down to match texture space
-vec2 uv_quad(vec2 corner) {
-	return vec2(corner.x + 0.5, 0.5 - corner.y);
+vec2 uv_quad() {
+	vec2 corner = vec2(gl_VertexIndex & 1, (gl_VertexIndex >> 1) & 1);  // [0,1]
+	return vec2(corner.x, 1.0 - corner.y);
 }
 
 void cull() {

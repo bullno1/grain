@@ -11,5 +11,5 @@ Params(
 )
 
 void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
-	particle.lifetime = mix(params.min_lifetime, params.max_lifetime, rand());
+	particle.lifetime = rand_range(params.min_lifetime, params.max_lifetime);
 }

@@ -27,8 +27,7 @@ void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 
 void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	// The color param is straight alpha while blending is premultiplied
-	vec4 color = unpackUnorm4x8(params.color);
-	grain_Color = vec4(color.rgb * color.a, color.a)
+	grain_Color = premultiply(unpackUnorm4x8(params.color))
 		* clamp(particle.lifetime, 0.0, 1.0);
 }
 

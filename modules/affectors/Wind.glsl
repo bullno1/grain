@@ -19,7 +19,7 @@ Params(
 
 void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	// rand() is reseeded per particle each frame, so this is a stable phase
-	float phase = rand() * 6.2831853;
+	float phase = rand() * TAU;
 	float gust = sin(ctx.time * params.gust_frequency + phase) * 0.6
 	           + sin(ctx.time * params.gust_frequency * 2.33 + phase * 1.7) * 0.4;
 	vec2 wind = params.velocity * (1.0 + params.gustiness * gust);
