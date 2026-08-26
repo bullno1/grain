@@ -40,7 +40,7 @@ grain_dsl_collect_vars(
 	int num_members,
 	CK_DYNA grain_dsl_var_t** vars
 ) {
-	const char* ignored = sintern("grain__ignore");
+	const char* ignored = sintern("grain_ignore");
 	for (int i = 0; i < num_members; ++i) {
 		const CSPV_ReflectionMember* member = &members[i];
 		if (member->name == ignored) { continue; }
@@ -315,8 +315,12 @@ grain_dsl_module_info_t*
 grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 	grain_vfs_entry_t vfs[] = {
 		{
-			.name = "internal/builtins.glsl",
-			.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_builtins)),
+			.name = "grain/api.glsl",
+			.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_api)),
+		},
+		{
+			.name = "grain/internal.glsl",
+			.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_internal)),
 		},
 		{
 			.name = "module.glsl",
@@ -339,11 +343,11 @@ grain_dsl_parse_module(grain_t* grain, const char* source, CSPV_Stage stage) {
 		return NULL;
 	}
 
-	const char* emitter_block_name = sintern("Grain__Inspect_Emitter");
-	const char* affector_block_name = sintern("Grain__Inspect_Affector");
-	const char* renderer_block_name = sintern("Grain__Inspect_Renderer");
-	const char* requires_block_name = sintern("Grain__Inspect_Requires");
-	const char* params_block_name = sintern("Grain__Inspect_Params");
+	const char* emitter_block_name = sintern("grain_Inspect_Emitter");
+	const char* affector_block_name = sintern("grain_Inspect_Affector");
+	const char* renderer_block_name = sintern("grain_Inspect_Renderer");
+	const char* requires_block_name = sintern("grain_Inspect_Requires");
+	const char* params_block_name = sintern("grain_Inspect_Params");
 
 	const char* module_name = NULL;
 	grain_module_kind_t module_kind = GRAIN_MODULE_INVALID;
@@ -430,12 +434,13 @@ bool
 grain_dsl_compile_archetype(
 	grain_t* grain,
 	grain_archetype_spec_t spec,
-	const char* common_source,
+	const char* attrs_source,
+	const char* archetype_internal_source,
 	const char* update_source,
 	const char* render_source,
 	grain_dsl_archetype_shaders_t* out
 ) {
-	int num_vfs_entries = spec.num_emitters + spec.num_affectors + 6;
+	int num_vfs_entries = spec.num_emitters + spec.num_affectors + 8;
 	int vfs_index = 0;
 	grain_vfs_entry_t* vfs_entries = cf_arena_alloc(&grain->arena, num_vfs_entries * sizeof(grain_vfs_entry_t));
 	for (int i = 0; i < spec.num_emitters; ++i) {
@@ -453,16 +458,24 @@ grain_dsl_compile_archetype(
 		};
 	}
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
-		.name = "internal/builtins.glsl",
-		.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_builtins)),
+		.name = "grain/api.glsl",
+		.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_api)),
+	};
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+		.name = "grain/internal.glsl",
+		.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_internal)),
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
 		.name = grain_sprintf(grain, "renderer/%s", ((grain_module_t*)spec.renderer)->info->name),
 		.content = ((grain_module_t*)spec.renderer)->source,
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
-		.name = "archetype/common.glsl",
-		.content = common_source,
+		.name = "archetype/attrs.glsl",
+		.content = attrs_source,
+	};
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+		.name = "archetype/internal.glsl",
+		.content = archetype_internal_source,
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
 		.name = "archetype/update.glsl",

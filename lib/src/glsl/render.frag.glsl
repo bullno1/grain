@@ -1,27 +1,28 @@
-#include "internal/builtins.glsl"
+#include "grain/api.glsl"
 #include "archetype/render.glsl"
 
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 	int grain_pool_size;
 };
 
-layout(location = 0) flat in uint v_region;
-layout(location = 1) flat in uint v_lid;
+// Locations 14-15: reserved for grain, see render.vert.glsl.
+layout(location = 14) flat in uint grain_v_region;
+layout(location = 15) flat in uint grain_v_lid;
 
 layout(location = 0) out vec4 result;
 
 void main() {
-	uint gid    = v_region * uint(grain_pool_size) + v_lid;
+	uint gid    = grain_v_region * uint(grain_pool_size) + grain_v_lid;
 	ivec2 size  = textureSize(grain_texture_0, 0);
 	ivec2 texel = ivec2(int(gid) % size.x, int(gid) / size.x);
 
 	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
-	ModuleParams params = grain_load_ModuleParams(v_region);
-	SystemClock clock = grain_load_SystemClock(v_region);
+	ModuleParams params = grain_load_ModuleParams(grain_v_region);
+	grain_SystemClock clock = grain_load_SystemClock(grain_v_region);
 
-	Schedule sch = grain_observe(particle.grain_birth, clock);
+	grain_Schedule sch = grain_observe(particle.grain_birth, clock);
 
-	srand(gid, floatBitsToUint(particle.grain_birth));
+	grain_srand(gid, floatBitsToUint(particle.grain_birth));
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;

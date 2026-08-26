@@ -1,58 +1,8 @@
-#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
-
-#define GRAIN_SAMPLER_SET 0
-#define GRAIN_UNIFORM_SET 1
-#define Varying(X) layout(location = X) out
-
-#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT
-
-#define GRAIN_SAMPLER_SET 2
-#define GRAIN_UNIFORM_SET 3
-#define Varying(X) layout(location = X) in
-
-#endif
-
-// GLSL ES 3.00 has only the 2x16 pack/unpack family, the 4x8 variants are ES
-// 3.10, so the GLES backend needs them spelled out. They are defined under
-// cf_ names and the real names redirected onto them: redefining a name the
-// driver may itself expose as a builtin is an overload conflict on some ES
-// drivers, while a cf_ name can never collide.
-#ifdef CF_GLES
-
-uint cf_packUnorm4x8(vec4 v) {
-	uvec4 p = uvec4(round(clamp(v, 0.0, 1.0) * 255.0));
-	return p.x | (p.y << 8) | (p.z << 16) | (p.w << 24);
-}
-
-vec4 cf_unpackUnorm4x8(uint u) {
-	return vec4(u & 0xFFu, (u >> 8) & 0xFFu, (u >> 16) & 0xFFu, u >> 24) / 255.0;
-}
-
-uint cf_packSnorm4x8(vec4 v) {
-	ivec4 p = ivec4(round(clamp(v, -1.0, 1.0) * 127.0));
-	return (uint(p.x) & 0xFFu) | ((uint(p.y) & 0xFFu) << 8) | ((uint(p.z) & 0xFFu) << 16) | ((uint(p.w) & 0xFFu) << 24);
-}
-
-vec4 cf_unpackSnorm4x8(uint u) {
-	ivec4 p = ivec4(u << 24, u << 16, u << 8, u) >> 24;
-	return clamp(vec4(p) / 127.0, -1.0, 1.0);
-}
-
-#define packUnorm4x8   cf_packUnorm4x8
-#define unpackUnorm4x8 cf_unpackUnorm4x8
-#define packSnorm4x8   cf_packSnorm4x8
-#define unpackSnorm4x8 cf_unpackSnorm4x8
-
-#endif
-
-struct Ctx {
-	float dt;
-	float frame_dt;
-	float time;
-};
+// Grain-internal builtins. Included after user modules (see api.glsl), so user
+// code cannot reference anything in here.
 
 // Mirrors grain_clock_entry_t. Two vec4s wide: see the comment there.
-struct SystemClock {
+struct grain_SystemClock {
     float elapsed;
     float dt;          // elapsed advanced since the last update pass
     float emit_base;   // emission counter at the last update pass, mod pool_size
@@ -66,27 +16,14 @@ struct SystemClock {
 // A particle's birth time is grain-internal state: it lives in a reserved lane of the
 // attribute texture, outside ParticleAttrs, so modules can neither read nor clobber
 // it. Negative means the slot has never been born.
-struct Schedule {
+struct grain_Schedule {
     bool  started;  // the slot holds a particle
     bool  emit;     // ...and it was born during this frame's window
     float birth;    // absolute time of that birth (post-emit value, when emit is set)
     float age;      // elapsed - birth
 };
 
-uint grain_rng_state;
-
-uint pcg(uint v) {
-    uint state = v * 747796405u + 2891336453u;
-    uint word  = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
-}
-
-void srand(uint id, uint gen) { grain_rng_state = pcg(id ^ pcg(gen)); }
-
-float rand() {
-    grain_rng_state = pcg(grain_rng_state);
-    return float(grain_rng_state) * (1.0 / 4294967296.0);
-}
+void grain_srand(uint id, uint gen) { grain_rng_state = grain_pcg(id ^ grain_pcg(gen)); }
 
 // Update-pass scheduling. Emission is counted, not timed: the k-th particle ever
 // emitted by a system lands in slot k mod pool_size, and each frame the CPU hands over
@@ -99,8 +36,8 @@ float rand() {
 // seconds, and pool_size = ceil(max_rate * lifetime_budget) + max_burst_size makes
 // that at least the budget at every permitted rate plus one max-size burst: a live
 // particle is never recycled.
-Schedule schedule(uint lid, uint pool_size, float birth, SystemClock clock) {
-	Schedule s;
+grain_Schedule grain_schedule(uint lid, uint pool_size, float birth, grain_SystemClock clock) {
+	grain_Schedule s;
 	s.birth = birth;
 	s.emit  = false;
 
@@ -142,8 +79,8 @@ Schedule schedule(uint lid, uint pool_size, float birth, SystemClock clock) {
 // Render-pass view of a slot: the update pass already stored the birth, so nothing is
 // decided here, only read back. `emit` recovers "born during the last update" so the
 // render stages can hand modules the same Ctx the update stage did.
-Schedule grain_observe(float birth, SystemClock clock) {
-	Schedule s;
+grain_Schedule grain_observe(float birth, grain_SystemClock clock) {
+	grain_Schedule s;
 	s.birth   = birth;
 	s.started = birth >= 0.0;
 	s.age     = s.started ? clock.elapsed - birth : 0.0;
@@ -151,8 +88,8 @@ Schedule grain_observe(float birth, SystemClock clock) {
 	return s;
 }
 
-SystemClock grain_unpack_SystemClock(uvec4 a, uvec4 b) {
-	SystemClock clock;
+grain_SystemClock grain_unpack_SystemClock(uvec4 a, uvec4 b) {
+	grain_SystemClock clock;
 	clock.elapsed    = uintBitsToFloat(a.x);
 	clock.dt         = uintBitsToFloat(a.y);
 	clock.emit_base  = uintBitsToFloat(a.z);
@@ -201,20 +138,3 @@ void
 grain_convert(out uint dst, uint src) {
 	dst = src;
 }
-
-#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
-
-vec2 quad() {
-	vec2 corner = vec2(gl_VertexIndex & 1, (gl_VertexIndex >> 1) & 1);  // [0,1]
-	return corner - 0.5; // [-0.5, 0.5]
-}
-
-void cull() {
-	gl_Position = vec4(2.0, 2.0, 2.0, 0.0);
-}
-
-#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT
-
-vec4 grain_Color;
-
-#endif

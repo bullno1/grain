@@ -1,14 +1,17 @@
-#include "internal/builtins.glsl"
+#include "grain/api.glsl"
 
-#define Emitter(X) layout(set = 0, binding = 0) uniform Grain__Inspect_Emitter { float X; } Emitter;
-#define Affector(X) layout(set = 0, binding = 3) uniform Grain__Inspect_Affector { float X; } Affector;
-#define Renderer(X) layout(set = 0, binding = 4) uniform Grain__Inspect_Renderer { float X; } Renderer;
-#define Requires(X) struct ParticleAttrs { X float grain__ignore; }; layout(set = 0, binding = 1) uniform Grain__Inspect_Requires {X float grain__ignore;} Requires;
-#define Params(X) struct ModuleParams { X float grain__ignore; }; layout(set = 0, binding = 2) uniform Grain__Inspect_Params {X float grain__ignore;} Params;
+#define Emitter(X) layout(set = 0, binding = 0) uniform grain_Inspect_Emitter { float X; } Emitter;
+#define Affector(X) layout(set = 0, binding = 3) uniform grain_Inspect_Affector { float X; } Affector;
+#define Renderer(X) layout(set = 0, binding = 4) uniform grain_Inspect_Renderer { float X; } Renderer;
+#define Requires(X) struct ParticleAttrs { X float grain_ignore; }; layout(set = 0, binding = 1) uniform grain_Inspect_Requires {X float grain_ignore;} Requires;
+#define Params(X) struct ModuleParams { X float grain_ignore; }; layout(set = 0, binding = 2) uniform grain_Inspect_Params {X float grain_ignore;} Params;
 
 mat4 grain_transform;
 
 #include "module.glsl"
+
+// Included after the module so it stays invisible to user code
+#include "grain/internal.glsl"
 
 void main() {
 	ParticleAttrs particle;

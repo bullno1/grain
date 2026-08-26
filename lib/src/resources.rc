@@ -3,5 +3,6 @@
 XINCBIN(grain_update_fs, GRAIN_SRC_DIR "glsl/update.frag.glsl")
 XINCBIN(grain_render_vs, GRAIN_SRC_DIR "glsl/render.vert.glsl")
 XINCBIN(grain_render_fs, GRAIN_SRC_DIR "glsl/render.frag.glsl")
-XINCBIN(grain_builtins, GRAIN_SRC_DIR "glsl/builtins.glsl")
+XINCBIN(grain_api, GRAIN_SRC_DIR "glsl/api.glsl")
+XINCBIN(grain_internal, GRAIN_SRC_DIR "glsl/internal.glsl")
 XINCBIN(grain_inspect_stub, GRAIN_SRC_DIR "glsl/inspect.glsl")

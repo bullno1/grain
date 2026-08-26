@@ -1,4 +1,4 @@
-#include "internal/builtins.glsl"
+#include "grain/api.glsl"
 #include "archetype/update.glsl"
 
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
@@ -15,18 +15,18 @@ void main() {
 
 	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
 	SystemParams params = grain_load_SystemParams(region);
-	SystemClock clock = grain_load_SystemClock(region);
+	grain_SystemClock clock = grain_load_SystemClock(region);
 
 	// The CPU folded `elapsed` down to keep it precise; bring this particle's birth
 	// into the same epoch. Only the update pass does this, and it stores the result,
 	// so the shift is applied exactly once.
 	if (particle.grain_birth >= 0.0) { particle.grain_birth -= clock.wrap_shift; }
 
-	Schedule sch = schedule(lid, uint(grain_pool_size), particle.grain_birth, clock);
+	grain_Schedule sch = grain_schedule(lid, uint(grain_pool_size), particle.grain_birth, clock);
 
 	// The seed is the birth time: unique per particle, fixed for its whole life, and
 	// the render stages recover the identical value from the texture.
-	srand(gid, floatBitsToUint(sch.birth));
+	grain_srand(gid, floatBitsToUint(sch.birth));
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;

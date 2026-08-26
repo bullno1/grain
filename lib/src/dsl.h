@@ -36,7 +36,8 @@ bool
 grain_dsl_compile_archetype(
 	grain_t* grain,
 	grain_archetype_spec_t spec,
-	const char* common_source,
+	const char* attrs_source,
+	const char* archetype_internal_source,
 	const char* update_source,
 	const char* render_source,
 	grain_dsl_archetype_shaders_t* out

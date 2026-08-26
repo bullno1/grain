@@ -1,4 +1,4 @@
-#include "internal/builtins.glsl"
+#include "grain/api.glsl"
 
 // Declared before the archetype include so the renderer module can use grain_transform.
 layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
@@ -8,8 +8,10 @@ layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
 
 #include "archetype/render.glsl"
 
-layout(location = 0) flat out uint v_region;
-layout(location = 1) flat out uint v_lid;
+// Locations 14-15: at the top of Vulkan's guaranteed range, clear of the
+// module's Varying() declarations, which count up from 0.
+layout(location = 14) flat out uint grain_v_region;
+layout(location = 15) flat out uint grain_v_lid;
 
 void main() {
 	uint inst   = uint(gl_InstanceIndex);
@@ -24,19 +26,19 @@ void main() {
 
 	ParticleAttrs particle = grain_load_ParticleAttrs(texel);
 	ModuleParams params = grain_load_ModuleParams(region);
-	SystemClock clock = grain_load_SystemClock(region);
+	grain_SystemClock clock = grain_load_SystemClock(region);
 
-	Schedule sch = grain_observe(particle.grain_birth, clock);
+	grain_Schedule sch = grain_observe(particle.grain_birth, clock);
 
-	srand(gid, floatBitsToUint(particle.grain_birth));
+	grain_srand(gid, floatBitsToUint(particle.grain_birth));
 
 	Ctx ctx;
 	ctx.frame_dt = clock.dt;
 	ctx.dt = sch.emit ? sch.age : clock.dt;
 	ctx.time = sch.emit ? sch.birth : clock.elapsed;
 
-	v_region = region;
-	v_lid = lid;
+	grain_v_region = region;
+	grain_v_lid = lid;
 
 	if (sch.started) {
 		process(particle, params, ctx);

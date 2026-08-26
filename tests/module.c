@@ -166,3 +166,43 @@ BTEST(module, malformed_decorator_fails_with_grain_error) {
 	// `float` parses as an ident value, so `gravity` is the offending token
 	GRAIN_EXPECT_ERROR_CONTAINS("Expected `,` or `)`");
 }
+
+BTEST(module, internal_builtins_are_not_visible_to_modules) {
+	// grain/internal.glsl is included after the module, and the compiler is
+	// single-pass, so internal functions are undeclared where user code compiles.
+	grain_emitter_t* emitter = grain_define_emitter(
+		test_grain(),
+		"Emitter(Sneaky)\n"
+		"Requires(\n"
+		"	vec2 velocity;\n"
+		")\n"
+		"Params(\n"
+		"	float gravity;\n"
+		")\n"
+		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	grain_srand(0u, 1u);\n"
+		"}"
+	);
+	BTEST_EXPECT(emitter == NULL);
+	GRAIN_EXPECT_ERROR_CONTAINS("unknown function 'grain_srand'");
+}
+
+BTEST(module, modules_cannot_include_internal_paths) {
+	// The inspect VFS only resolves grain/api.glsl, grain/internal.glsl (already
+	// included by the stub), and the module itself; archetype and other-module
+	// paths fail at definition time.
+	grain_emitter_t* emitter = grain_define_emitter(
+		test_grain(),
+		"#include \"archetype/attrs.glsl\"\n"
+		"Emitter(Sneaky2)\n"
+		"Requires(\n"
+		"	vec2 velocity;\n"
+		")\n"
+		"Params(\n"
+		"	float gravity;\n"
+		")\n"
+		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {}"
+	);
+	BTEST_EXPECT(emitter == NULL);
+	GRAIN_EXPECT_ERROR_CONTAINS("cannot open include file \"archetype/attrs.glsl\"");
+}
