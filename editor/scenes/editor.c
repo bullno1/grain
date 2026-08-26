@@ -1,3 +1,4 @@
+// vim: set foldmethod=marker foldlevel=0:
 #define _GNU_SOURCE
 #include <cute.h>
 #include <blog.h>
@@ -29,6 +30,37 @@
 		} \
 	} while (0)
 
+// States
+
+// UI states {{{
+
+SCENE_VAR(bool, show_emitters)
+SCENE_VAR(bool, show_affectors)
+SCENE_VAR(bool, show_renderer)
+SCENE_VAR(bool, show_log)
+SCENE_VAR(bool, log_auto_scroll)
+
+SCENE_VAR(int, gui_emitter_index)
+SCENE_VAR(int, gui_affector_index)
+SCENE_VAR(int, gui_renderer_index)
+
+SCENE_VAR(bool, show_system)
+SCENE_VAR(float, emission_rate)
+SCENE_VAR(int, burst_count)
+
+// The pool options in effect; grain_pool_t is opaque so the editor tracks them
+SCENE_VAR(float, current_lifetime_budget)
+SCENE_VAR(float, current_max_emission_rate)
+SCENE_VAR(int, current_max_burst_size)
+// Edited in the System window, applied only when the pool is recreated
+SCENE_VAR(float, pending_lifetime_budget)
+SCENE_VAR(float, pending_max_emission_rate)
+SCENE_VAR(int, pending_max_burst_size)
+
+// }}}
+
+// Grain {{{
+
 typedef struct {
 	grain_module_ref_t ref;
 	char* source;
@@ -43,38 +75,12 @@ typedef struct {
 	char data[128];
 } system_name_t;
 
-typedef struct {
-	int offset;
-	int len;
-	blog_level_t level;
-} log_entry_t;
-
 SCENE_VAR(grain_t*, grain)
-SCENE_VAR(bool, show_emitters)
-SCENE_VAR(bool, show_affectors)
-SCENE_VAR(bool, show_renderer)
-SCENE_VAR(bool, show_log)
-SCENE_VAR(bool, log_auto_scroll)
-SCENE_VAR(char*, log_text)
-SCENE_VAR(barray(log_entry_t), log_lines)
 SCENE_VAR(char*, tmp_source_buf)
-
 SCENE_VAR(char*, last_module_path)
 SCENE_VAR(char*, last_system_path)
 SCENE_VAR(system_name_t, system_name)
-SCENE_VAR(bool, unsaved_changes)
-SCENE_VAR(ufa_file_ref_t*, current_file_ref)
 SCENE_VAR(grain_renderer_t*, noop_renderer)
-
-SCENE_VAR(CK_MAP(module_meta_t*), emitters)
-SCENE_VAR(CK_MAP(module_meta_t*), affectors)
-SCENE_VAR(CK_MAP(module_meta_t*), renderers)
-
-SCENE_VAR(char*, popup_error)
-
-#ifndef __EMSCRIPTEN__
-SCENE_VAR(bresmon_t*, bresmon)
-#endif
 
 SCENE_VAR(barray(grain_emitter_t*), archetype_emitters)
 SCENE_VAR(barray(grain_affector_t*), archetype_affectors)
@@ -83,25 +89,29 @@ SCENE_VAR(grain_archetype_t*, archetype)
 SCENE_VAR(grain_pool_t*, pool)
 SCENE_VAR(grain_system_t*, particle_system)
 
-SCENE_VAR(int, gui_emitter_index)
-SCENE_VAR(int, gui_affector_index)
-SCENE_VAR(int, gui_renderer_index)
+#ifndef __EMSCRIPTEN__
+SCENE_VAR(bresmon_t*, bresmon)
+#endif
 
-SCENE_VAR(bool, show_system)
-SCENE_VAR(float, emission_rate)
-SCENE_VAR(int, burst_count)
-// The pool options in effect; grain_pool_t is opaque so the editor tracks them
-SCENE_VAR(float, current_lifetime_budget)
-SCENE_VAR(float, current_max_emission_rate)
-SCENE_VAR(int, current_max_burst_size)
-// Edited in the System window, applied only when the pool is recreated
-SCENE_VAR(float, pending_lifetime_budget)
-SCENE_VAR(float, pending_max_emission_rate)
-SCENE_VAR(int, pending_max_burst_size)
+// }}}
+
+// Document lifecycle {{{
+
+SCENE_VAR(bool, unsaved_changes)
+SCENE_VAR(ufa_file_ref_t*, current_file_ref)
+SCENE_VAR(CK_MAP(module_meta_t*), emitters)
+SCENE_VAR(CK_MAP(module_meta_t*), affectors)
+SCENE_VAR(CK_MAP(module_meta_t*), renderers)
+
+// }}}
+
+// Modal {{{
+
+SCENE_VAR(char*, popup_error)
 
 static _Alignas(bco_align_t) char modal_action_storage[2048];
 static bco_t* modal_action = (bco_t*)modal_action_storage;
-static bool native_modal_guard = false;
+
 static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
 
@@ -113,6 +123,7 @@ typedef enum {
 	SAVE_PROMPT_DONT_SAVE,
 	SAVE_PROMPT_CANCEL,
 } save_prompt_result_t;
+
 static bool should_prompt_unsaved = false;
 static bool unsaved_prompt_active = false;
 static save_prompt_result_t save_prompt_result = SAVE_PROMPT_CANCEL;
@@ -120,10 +131,29 @@ static save_prompt_result_t save_prompt_result = SAVE_PROMPT_CANCEL;
 // Result of the last do_save_system run, for callers that chain on it
 static bool save_flow_succeeded = false;
 
+// }}}
+
+// Logging {{{
+
+typedef struct {
+	int offset;
+	int len;
+	blog_level_t level;
+} log_entry_t;
+
+SCENE_VAR(char*, log_text)
+SCENE_VAR(barray(log_entry_t), log_lines)
+
 // Both reset on live reload, in sync with blog's own logger registry which
 // also lives in (bgame's) statics.
 static bool log_sink_hooked = false;
 static bool log_sink_active = false;
+
+// }}}
+
+// Functions
+
+// Logging {{{
 
 static void
 editor_log_sink(const blog_ctx_t* ctx, blog_str_t msg, void* userdata) {
@@ -169,6 +199,35 @@ log_level_color(blog_level_t level) {
 		default:               return (ImVec4){ 1.0f, 1.0f, 1.0f, 1.0f };
 	}
 }
+
+// }}}
+
+// Modal {{{
+
+static void
+begin_native_modal(void) {
+	should_begin_native_modal = true;
+	should_end_native_modal = false;
+
+	bgame_block_reload();
+}
+
+static void
+end_native_modal(void) {
+	bgame_unblock_reload();
+
+	should_end_native_modal = true;
+}
+
+static void
+show_error(const char* error) {
+	sset(popup_error, error);
+	should_popup_error = true;
+}
+
+// }}}
+
+// Grain {{{
 
 static const char*
 read_open_file(ufa_open_file_t* open_file) {
@@ -279,6 +338,185 @@ param_type_size(CF_ShaderInfoDataType type) {
 			return 0;
 	}
 }
+
+static void
+remember_directory(char** dir_var, const char* file_path) {
+	int slash_index;
+	for (slash_index = (int)strlen(file_path); slash_index >= 0; --slash_index) {
+		if (file_path[slash_index] == '/' || file_path[slash_index] == '\\') { break; }
+	}
+	if (slash_index > 0) {
+		sclear(*dir_var);
+		sappend_range(*dir_var, file_path, file_path + slash_index);
+	}
+}
+
+// SDL reads the filter list when the dialog's callback fires, long after the
+// begin call has yielded out of the coroutine, so the filters cannot be
+// compound literals in the coroutine's (transient) stack frame
+static const ufa_filter_t module_file_filters[] = {
+	{ .name = "grain module", .pattern = "shd;glsl" },
+	{ .name = "All files", .pattern = "*" },
+};
+static const ufa_filter_t system_file_filters[] = {
+	{ .name = "grain system", .pattern = "json" },
+	{ .name = "All files", .pattern = "*" },
+};
+
+bco_static(import_module) {
+	bco_vars(
+		barena_t arena;
+		ufa_open_file_t* open_file;
+	)
+
+	bco_begin
+	begin_native_modal();
+
+	barena_init(&bco_var(arena), bgame_arena_pool);
+	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
+		.arena = &bco_var(arena),
+		.memalign = barena_memalign,
+		.parent_window = cf_app_get_window(),
+		.filters = module_file_filters,
+		.num_filters = CF_ARRAY_SIZE(module_file_filters),
+		.directory = last_module_path,
+	});
+
+	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
+		bco_yield();
+	}
+
+	ufa_status_t open_status = ufa_check_open_file(bco_var(open_file));
+	if (open_status == UFA_CANCELLED) { bco_return(); }
+	if (open_status == UFA_ERROR) {
+		show_error(ufa_get_open_file_error(bco_var(open_file)));
+		bco_return();
+	}
+
+	const char* source = read_open_file(bco_var(open_file));
+	if (source == NULL) {
+		show_error(ufa_get_open_file_error(bco_var(open_file)));
+		bco_return();
+	}
+
+	const char* module_path = ufa_get_open_file_name(bco_var(open_file));
+
+	grain_module_ref_t module_ref = grain_define_module(grain, source);
+	if (module_ref.kind == GRAIN_MODULE_INVALID) {
+		const char* error = grain_get_last_error(grain);
+		show_error(error);
+		BLOG_ERROR("Error while loading %s: %s", module_path, error);
+		bco_return();
+	}
+
+	const char* module_name = NULL;
+	CK_MAP(module_meta_t*)* module_map = NULL;
+	const char* type_name = NULL;
+	switch (module_ref.kind) {
+		case GRAIN_MODULE_EMITTER: {
+			module_name = grain_get_emitter_name(module_ref.module);
+			module_map = &emitters;
+			type_name = "emitter";
+		} break;
+		case GRAIN_MODULE_AFFECTOR: {
+			module_name = grain_get_affector_name(module_ref.module);
+			module_map = &affectors;
+			type_name = "affector";
+		} break;
+		case GRAIN_MODULE_RENDERER: {
+			module_name = grain_get_renderer_name(module_ref.module);
+			module_map = &renderers;
+			type_name = "renderer";
+		} break;
+		default: bco_return();
+	}
+
+	module_meta_t* module_meta = map_get(*module_map, module_name);
+	if (module_meta == NULL) {
+		module_meta = bgame_malloc(sizeof(module_meta_t), scene_allocator);
+		map_set(*module_map, module_name, module_meta);
+		*module_meta = (module_meta_t){
+			.ref = module_ref,
+		};
+
+#ifndef __EMSCRIPTEN__
+		watch_module(ufa_get_open_file_name(bco_var(open_file)), module_meta);
+#endif
+	}
+	sset(module_meta->source, source);
+	sset(module_meta->path, module_path);
+
+	remember_directory(&last_module_path, module_path);
+
+	BLOG_INFO("Loaded %s %s", type_name, module_path);
+
+	bco_end
+
+	ufa_end_open_file(bco_var(open_file));
+	barena_reset(&bco_var(arena));
+	end_native_modal();
+}
+
+static CK_MAP(module_meta_t*)*
+module_map_for_kind(grain_module_kind_t kind) {
+	switch (kind) {
+		case GRAIN_MODULE_EMITTER: return &emitters;
+		case GRAIN_MODULE_AFFECTOR: return &affectors;
+		case GRAIN_MODULE_RENDERER: return &renderers;
+		default: return NULL;
+	}
+}
+
+// The new pool is created before the old one is destroyed so that a rejected
+// configuration (grain_create_pool validates it) leaves the current pool running.
+static void
+recreate_pool(grain_archetype_info_t* archetype_info) {
+	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
+		.archetype = archetype,
+		.lifetime_budget = pending_lifetime_budget,
+		.max_emission_rate = pending_max_emission_rate,
+		.max_burst_size = pending_max_burst_size,
+		.max_systems = 1,
+	});
+	if (new_pool == NULL) {
+		BLOG_ERROR("Could not recreate pool: %s", grain_get_last_error(grain));
+		show_error(grain_get_last_error(grain));
+		return;
+	}
+
+	grain_system_t* new_system = grain_create_system(new_pool);
+
+	// Module params live in the pool's buffers; carry them over so Apply does
+	// not reset everything the user has tuned.
+	int num_params = archetype_info->renderer.first_param + archetype_info->renderer.num_params;
+	for (int i = 0; i < num_params; ++i) {
+		int size = param_type_size(archetype_info->params[i].type);
+		void* src = grain_get_parameter(particle_system, i);
+		void* dst = grain_get_parameter(new_system, i);
+		if (src != NULL && dst != NULL && size > 0) {
+			memcpy(dst, src, size);
+			grain_parameter_modified(new_system, i);
+		}
+	}
+
+	grain_destroy_pool(pool);
+	pool = new_pool;
+	particle_system = new_system;
+
+	current_lifetime_budget = pending_lifetime_budget;
+	current_max_emission_rate = pending_max_emission_rate;
+	current_max_burst_size = pending_max_burst_size;
+	unsaved_changes = true;
+
+	BLOG_INFO(
+		"Recreated pool: %.1f particles/s max, %.1fs lifetime budget, %d max burst",
+		current_max_emission_rate, current_lifetime_budget, current_max_burst_size
+	);
+}
+
+// }}}
+
+// Editor widgets {{{
 
 static bool
 show_module_list(CK_MAP(module_meta_t*) module_map, const char* label, int* current_item) {
@@ -457,154 +695,9 @@ show_module_params(
 	}
 }
 
-static void
-begin_native_modal(void) {
-	should_begin_native_modal = true;
-	should_end_native_modal = false;
+// }}}
 
-	bgame_block_reload();
-}
-
-static void
-end_native_modal(void) {
-	bgame_unblock_reload();
-
-	should_end_native_modal = true;
-}
-
-static void
-show_error(const char* error) {
-	sset(popup_error, error);
-	should_popup_error = true;
-}
-
-static void
-remember_directory(char** dir_var, const char* file_path) {
-	int slash_index;
-	for (slash_index = (int)strlen(file_path); slash_index >= 0; --slash_index) {
-		if (file_path[slash_index] == '/' || file_path[slash_index] == '\\') { break; }
-	}
-	if (slash_index > 0) {
-		sclear(*dir_var);
-		sappend_range(*dir_var, file_path, file_path + slash_index);
-	}
-}
-
-// SDL reads the filter list when the dialog's callback fires, long after the
-// begin call has yielded out of the coroutine, so the filters cannot be
-// compound literals in the coroutine's (transient) stack frame
-static const ufa_filter_t module_file_filters[] = {
-	{ .name = "grain module", .pattern = "shd;glsl" },
-	{ .name = "All files", .pattern = "*" },
-};
-static const ufa_filter_t system_file_filters[] = {
-	{ .name = "grain system", .pattern = "json" },
-	{ .name = "All files", .pattern = "*" },
-};
-
-bco_static(import_module) {
-	bco_vars(
-		barena_t arena;
-		ufa_open_file_t* open_file;
-	)
-
-	bco_begin
-	begin_native_modal();
-
-	barena_init(&bco_var(arena), bgame_arena_pool);
-	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
-		.arena = &bco_var(arena),
-		.memalign = barena_memalign,
-		.parent_window = cf_app_get_window(),
-		.filters = module_file_filters,
-		.num_filters = CF_ARRAY_SIZE(module_file_filters),
-		.directory = last_module_path,
-	});
-
-	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
-		bco_yield();
-	}
-
-	ufa_status_t open_status = ufa_check_open_file(bco_var(open_file));
-	if (open_status == UFA_CANCELLED) { bco_return(); }
-	if (open_status == UFA_ERROR) {
-		show_error(ufa_get_open_file_error(bco_var(open_file)));
-		bco_return();
-	}
-
-	const char* source = read_open_file(bco_var(open_file));
-	if (source == NULL) {
-		show_error(ufa_get_open_file_error(bco_var(open_file)));
-		bco_return();
-	}
-
-	const char* module_path = ufa_get_open_file_name(bco_var(open_file));
-
-	grain_module_ref_t module_ref = grain_define_module(grain, source);
-	if (module_ref.kind == GRAIN_MODULE_INVALID) {
-		const char* error = grain_get_last_error(grain);
-		show_error(error);
-		BLOG_ERROR("Error while loading %s: %s", module_path, error);
-		bco_return();
-	}
-
-	const char* module_name = NULL;
-	CK_MAP(module_meta_t*)* module_map = NULL;
-	const char* type_name = NULL;
-	switch (module_ref.kind) {
-		case GRAIN_MODULE_EMITTER: {
-			module_name = grain_get_emitter_name(module_ref.module);
-			module_map = &emitters;
-			type_name = "emitter";
-		} break;
-		case GRAIN_MODULE_AFFECTOR: {
-			module_name = grain_get_affector_name(module_ref.module);
-			module_map = &affectors;
-			type_name = "affector";
-		} break;
-		case GRAIN_MODULE_RENDERER: {
-			module_name = grain_get_renderer_name(module_ref.module);
-			module_map = &renderers;
-			type_name = "renderer";
-		} break;
-		default: bco_return();
-	}
-
-	module_meta_t* module_meta = map_get(*module_map, module_name);
-	if (module_meta == NULL) {
-		module_meta = bgame_malloc(sizeof(module_meta_t), scene_allocator);
-		map_set(*module_map, module_name, module_meta);
-		*module_meta = (module_meta_t){
-			.ref = module_ref,
-		};
-
-#ifndef __EMSCRIPTEN__
-		watch_module(ufa_get_open_file_name(bco_var(open_file)), module_meta);
-#endif
-	}
-	sset(module_meta->source, source);
-	sset(module_meta->path, module_path);
-
-	remember_directory(&last_module_path, module_path);
-
-	BLOG_INFO("Loaded %s %s", type_name, module_path);
-
-	bco_end
-
-	ufa_end_open_file(bco_var(open_file));
-	barena_reset(&bco_var(arena));
-	end_native_modal();
-}
-
-static CK_MAP(module_meta_t*)*
-module_map_for_kind(grain_module_kind_t kind) {
-	switch (kind) {
-		case GRAIN_MODULE_EMITTER: return &emitters;
-		case GRAIN_MODULE_AFFECTOR: return &affectors;
-		case GRAIN_MODULE_RENDERER: return &renderers;
-		default: return NULL;
-	}
-}
+// Document lifecycle {{{
 
 static const char*
 save_module_path(void* userdata, grain_module_kind_t kind, const char* module_name) {
@@ -1004,6 +1097,10 @@ bco_static(open_system) {
 	}
 }
 
+// }}}
+
+// Scene lifecycle {{{
+
 static void
 cleanup_module_map(CK_MAP(module_meta_t*)* module_map) {
 	for (int i = 0; i < map_size(*module_map); ++i) {
@@ -1125,57 +1222,7 @@ cleanup(void) {
 	sfree(last_module_path);
 	sfree(last_system_path);
 
-	if (current_file_ref != NULL) {
-		ufa_release_file_ref(current_file_ref);
-		current_file_ref = NULL;
-	}
-}
-
-// The new pool is created before the old one is destroyed so that a rejected
-// configuration (grain_create_pool validates it) leaves the current pool running.
-static void
-recreate_pool(grain_archetype_info_t* archetype_info) {
-	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
-		.archetype = archetype,
-		.lifetime_budget = pending_lifetime_budget,
-		.max_emission_rate = pending_max_emission_rate,
-		.max_burst_size = pending_max_burst_size,
-		.max_systems = 1,
-	});
-	if (new_pool == NULL) {
-		BLOG_ERROR("Could not recreate pool: %s", grain_get_last_error(grain));
-		show_error(grain_get_last_error(grain));
-		return;
-	}
-
-	grain_system_t* new_system = grain_create_system(new_pool);
-
-	// Module params live in the pool's buffers; carry them over so Apply does
-	// not reset everything the user has tuned.
-	int num_params = archetype_info->renderer.first_param + archetype_info->renderer.num_params;
-	for (int i = 0; i < num_params; ++i) {
-		int size = param_type_size(archetype_info->params[i].type);
-		void* src = grain_get_parameter(particle_system, i);
-		void* dst = grain_get_parameter(new_system, i);
-		if (src != NULL && dst != NULL && size > 0) {
-			memcpy(dst, src, size);
-			grain_parameter_modified(new_system, i);
-		}
-	}
-
-	grain_destroy_pool(pool);
-	pool = new_pool;
-	particle_system = new_system;
-
-	current_lifetime_budget = pending_lifetime_budget;
-	current_max_emission_rate = pending_max_emission_rate;
-	current_max_burst_size = pending_max_burst_size;
-	unsaved_changes = true;
-
-	BLOG_INFO(
-		"Recreated pool: %.1f particles/s max, %.1fs lifetime budget, %d max burst",
-		current_max_emission_rate, current_lifetime_budget, current_max_burst_size
-	);
+	ufa_release_file_ref(current_file_ref);
 }
 
 static void
@@ -1187,6 +1234,7 @@ update(void) {
 
 	ImGui_DockSpaceOverViewportEx(0, NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
 
+// Menu bar {{{
 	if (ImGui_BeginMainMenuBar()) {
 		if (ImGui_BeginMenu("File")) {
 			if (ImGui_MenuItem("New")) {
@@ -1239,7 +1287,9 @@ update(void) {
 		}
 		ImGui_EndMainMenuBar();
 	}
+// }}}
 
+// Param windows {{{
 	grain_archetype_info_t archetype_info = grain_inspect_archetype(archetype);
 	grain_begin_update(grain);
 	grain_set_emission_rate(particle_system, emission_rate);
@@ -1399,9 +1449,12 @@ update(void) {
 		}
 		ImGui_End();
 	}
+
 	grain_tick(particle_system, CF_DELTA_TIME);
 	grain_end_update(grain);
+// }}}
 
+// Logging {{{
 	if (show_log) {
 		if (ImGui_Begin("Log", &show_log, 0)) {
 			if (ImGui_Button("Clear")) {
@@ -1438,7 +1491,9 @@ update(void) {
 		}
 		ImGui_End();
 	}
+// }}}
 
+// Modal {{{
 	if (bco_status(modal_action) != BCO_TERMINATED) {
 		bco_resume(modal_action);
 	}
@@ -1520,6 +1575,7 @@ update(void) {
 		save_prompt_result = SAVE_PROMPT_CANCEL;
 		unsaved_prompt_active = false;
 	}
+// }}}
 
 #ifndef __EMSCRIPTEN__
 	if (bresmon_should_reload(bresmon, false) > 0) {
@@ -1563,6 +1619,8 @@ update(void) {
 
 	cf_app_draw_onto_screen(false);
 }
+
+// }}}
 
 SCENE {
 	.init = init,
