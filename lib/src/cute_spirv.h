@@ -1811,23 +1811,31 @@ static void cspv_pp_process_file(cspv_pp* pp, const char* raw_source, int file_i
 				cspv_pp_pending pending = cspv_pp_scan_pending(pp, ls, le);
 				if (pending == CSPV_PP_COMPLETE) break;
 				const char* next = line_end + 1;
-				if (pending == CSPV_PP_WANT_PAREN) {
-					// Only join when the next line really does open the argument list,
-					// so a bare macro name never drags an unrelated line up with it.
-					const char* peek = next;
-					while (*peek == ' ' || *peek == '\t' || *peek == '\n') peek++;
-					if (*peek != '(') break;
-				}
+				const char* peek = next;
+				while (*peek == ' ' || *peek == '\t' || *peek == '\n') peek++;
+				// Only join a pending macro name when the next line really does open
+				// the argument list, so a bare name never drags an unrelated line up
+				// with it. And a directive never becomes argument text: stop, and let
+				// the expander report the unterminated invocation.
+				if (pending == CSPV_PP_WANT_PAREN && *peek != '(') break;
+				if (*peek == '#') break;
 				if (!joined) {
 					joined = smake("");
 					sappend_range(joined, ls, le);
 				}
-				spush(joined, ' '); // Stands in for the newline the join swallows.
-				const char* next_end = next;
-				while (*next_end && *next_end != '\n') next_end++;
-				bool continued = next_end > next && next_end[-1] == '\\';
-				sappend_range(joined, next, continued ? next_end - 1 : next_end);
-				line_end = next_end;
+				spush(joined, ' '); // Argument whitespace, standing in for the newline.
+				// Absorb one more physical line — plus any backslash continuations it
+				// carries, spliced with nothing just as the join loop above does.
+				for (;;) {
+					const char* next_end = next;
+					while (*next_end && *next_end != '\n') next_end++;
+					bool continued = next_end > next && next_end[-1] == '\\';
+					sappend_range(joined, next, continued ? next_end - 1 : next_end);
+					line_end = next_end;
+					if (!continued || !*line_end) break;
+					pp->line++;
+					next = line_end + 1;
+				}
 				ls = joined;
 				le = joined + slen(joined);
 				pp->line++;
