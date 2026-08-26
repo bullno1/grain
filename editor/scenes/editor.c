@@ -122,6 +122,7 @@ SCENE_VAR(char*, last_texture_path)
 // Modal {{{
 
 SCENE_VAR(char*, popup_error)
+SCENE_VAR(char*, attributions_text)
 
 static _Alignas(bco_align_t) char modal_action_storage[2048];
 static bco_t* modal_action = (bco_t*)modal_action_storage;
@@ -130,6 +131,7 @@ static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
 
 static bool should_popup_error = false;
+static bool should_popup_about = false;
 
 typedef enum {
 	SAVE_PROMPT_PENDING,
@@ -1526,6 +1528,7 @@ cleanup(void) {
 	clear_texture_bindings();
 	sfree(tmp_source_buf);
 	sfree(popup_error);
+	sfree(attributions_text);
 	sfree(last_module_path);
 	sfree(last_system_path);
 	sfree(last_texture_path);
@@ -1590,6 +1593,14 @@ update(void) {
 
 			if (ImGui_MenuItemEx("Log", NULL, show_log, true)) {
 				show_log = !show_log;
+			}
+
+			ImGui_EndMenu();
+		}
+
+		if (ImGui_BeginMenu("Help")) {
+			if (ImGui_MenuItem("About")) {
+				should_popup_about = true;
 			}
 
 			ImGui_EndMenu();
@@ -1881,6 +1892,39 @@ update(void) {
 			| ImGuiWindowFlags_NoMove
 	)) {
 		ImGui_Text("%s", popup_error);
+		if (ImGui_Button("OK")) {
+			ImGui_CloseCurrentPopup();
+		}
+
+		ImGui_EndPopup();
+	}
+
+	if (should_popup_about) {
+		if (attributions_text == NULL) {
+			char* content = cf_fs_read_entire_file_to_memory_and_nul_terminate(
+				"/assets/ATTRIBUTIONS.md", NULL
+			);
+			if (content != NULL) {
+				sset(attributions_text, content);
+				cf_free(content);
+			} else {
+				sset(attributions_text, "Could not load /assets/ATTRIBUTIONS.md");
+			}
+		}
+
+		ImGui_OpenPopup("About", 0);
+		should_popup_about = false;
+	}
+
+	if (ImGui_BeginPopupModal(
+			"About",
+			NULL,
+			ImGuiWindowFlags_AlwaysAutoResize
+	)) {
+		ImGui_TextUnformatted("grain-editor");
+		ImGui_SeparatorText("Attributions");
+		ImGui_TextUnformatted(attributions_text);
+
 		if (ImGui_Button("OK")) {
 			ImGui_CloseCurrentPopup();
 		}

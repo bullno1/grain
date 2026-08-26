@@ -6,6 +6,7 @@
 #include <blog.h>
 #include <cute.h>
 #include <SDL3/SDL_video.h>
+#include <stdio.h>
 
 #ifdef __EMSCRIPTEN__
 #	include <emscripten/html5.h>
@@ -62,6 +63,14 @@ init(int argc, const char** argv) {
 			BLOG_FATAL("Could not create app: %s", result.details);
 			abort();
 		}
+
+#ifdef __EMSCRIPTEN__
+		cf_fs_mount("/assets", "/assets", true);
+#else
+		char assets_dir[1024];
+		snprintf(assets_dir, sizeof(assets_dir), "%sassets", cf_fs_get_base_directory());
+		cf_fs_mount(assets_dir, "/assets", true);
+#endif
 
 #ifdef __EMSCRIPTEN__
 		// SDL's Emscripten backend adopts the CSS-driven canvas size at creation
