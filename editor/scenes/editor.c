@@ -62,6 +62,9 @@ SCENE_VAR(char*, tmp_source_buf)
 SCENE_VAR(char*, last_module_path)
 SCENE_VAR(char*, last_system_path)
 SCENE_VAR(system_name_t, system_name)
+SCENE_VAR(bool, unsaved_changes)
+SCENE_VAR(ufa_file_ref_t*, current_file_ref)
+SCENE_VAR(grain_renderer_t*, noop_renderer)
 
 SCENE_VAR(CK_MAP(module_meta_t*), emitters)
 SCENE_VAR(CK_MAP(module_meta_t*), affectors)
@@ -96,13 +99,26 @@ SCENE_VAR(float, pending_lifetime_budget)
 SCENE_VAR(float, pending_max_emission_rate)
 SCENE_VAR(int, pending_max_burst_size)
 
-static _Alignas(bco_align_t) char modal_action_storage[1024];
+static _Alignas(bco_align_t) char modal_action_storage[2048];
 static bco_t* modal_action = (bco_t*)modal_action_storage;
 static bool native_modal_guard = false;
 static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
 
 static bool should_popup_error = false;
+
+typedef enum {
+	SAVE_PROMPT_PENDING,
+	SAVE_PROMPT_SAVE,
+	SAVE_PROMPT_DONT_SAVE,
+	SAVE_PROMPT_CANCEL,
+} save_prompt_result_t;
+static bool should_prompt_unsaved = false;
+static bool unsaved_prompt_active = false;
+static save_prompt_result_t save_prompt_result = SAVE_PROMPT_CANCEL;
+
+// Result of the last do_save_system run, for callers that chain on it
+static bool save_flow_succeeded = false;
 
 // Both reset on live reload, in sync with blog's own logger registry which
 // also lives in (bgame's) statics.
@@ -436,6 +452,7 @@ show_module_params(
 
 		if (updated) {
 			grain_parameter_modified(particle_system, param_index);
+			unsaved_changes = true;
 		}
 	}
 }
@@ -599,13 +616,31 @@ save_module_path(void* userdata, grain_module_kind_t kind, const char* module_na
 	return module_meta != NULL ? module_meta->path : NULL;
 }
 
-bco_static(save_system) {
+// Waits until the user picks a choice in the "Unsaved changes" modal.
+// The choice is left in save_prompt_result.
+bco_static(prompt_unsaved_changes) {
+	bco_begin
+
+	save_prompt_result = SAVE_PROMPT_PENDING;
+	should_prompt_unsaved = true;
+	while (save_prompt_result == SAVE_PROMPT_PENDING) {
+		bco_yield();
+	}
+
+	bco_end
+}
+
+// Save to current_file_ref without a dialog when one is held ("Save"), or
+// always through a dialog when force_dialog is set ("Save as").
+// Success is left in save_flow_succeeded for chained flows.
+bco_static(do_save_system, bool force_dialog) {
 	bco_vars(
 		barena_t arena;
 		ufa_save_file_t* save_file;
 	)
 
 	bco_begin
+	save_flow_succeeded = false;
 	begin_native_modal();
 
 	barena_init(&bco_var(arena), bgame_arena_pool);
@@ -616,6 +651,8 @@ bco_static(save_system) {
 		.filters = system_file_filters,
 		.num_filters = CF_ARRAY_SIZE(system_file_filters),
 		.directory = last_system_path,
+		.suggested_name = system_name.data[0] != '\0' ? system_name.data : NULL,
+		.file_ref = bco_arg(force_dialog) ? NULL : current_file_ref,
 	});
 
 	while (ufa_check_save_file(bco_var(save_file)) == UFA_PENDING) {
@@ -667,6 +704,14 @@ bco_static(save_system) {
 	cf_destroy_json(doc);
 
 	if (write_ok) {
+		ufa_file_ref_t* new_ref = ufa_ref_save_file(bco_var(save_file));
+		if (new_ref != NULL) {
+			if (current_file_ref != NULL) { ufa_release_file_ref(current_file_ref); }
+			current_file_ref = new_ref;
+		}
+
+		unsaved_changes = false;
+		save_flow_succeeded = true;
 		remember_directory(&last_system_path, file_path);
 		BLOG_INFO("Saved system to %s", file_path);
 	}
@@ -679,6 +724,81 @@ bco_static(save_system) {
 }
 
 static void
+reset_editor_system(void) {
+	barray_clear(archetype_emitters);
+	barray_clear(archetype_affectors);
+	archetype_renderer = noop_renderer;
+	gui_renderer_index = -1;
+
+	grain_archetype_t* new_archetype = grain_define_archetype(
+		grain, "Editor",
+		(grain_archetype_spec_t){
+			.emitters = archetype_emitters,
+			.num_emitters = barray_len(archetype_emitters),
+
+			.affectors = archetype_affectors,
+			.num_affectors = barray_len(archetype_affectors),
+
+			.renderer = archetype_renderer,
+		}
+	);
+	if (new_archetype == NULL) {
+		BLOG_ERROR("Could not reset archetype: %s", grain_get_last_error(grain));
+		show_error(grain_get_last_error(grain));
+		return;
+	}
+	archetype = new_archetype;
+
+	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
+		.archetype = archetype,
+		.lifetime_budget = 16.f,
+		.max_emission_rate = 512.f,
+		.max_burst_size = 256,
+		.max_systems = 1,
+	});
+	if (new_pool == NULL) {
+		BLOG_ERROR("Could not recreate pool: %s", grain_get_last_error(grain));
+		show_error(grain_get_last_error(grain));
+		return;
+	}
+	grain_destroy_pool(pool);
+	pool = new_pool;
+	particle_system = grain_create_system(new_pool);
+
+	emission_rate = 10.f;
+	burst_count = 50;
+	current_lifetime_budget = pending_lifetime_budget = 16.f;
+	current_max_emission_rate = pending_max_emission_rate = 512.f;
+	current_max_burst_size = pending_max_burst_size = 256;
+	snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
+
+	if (current_file_ref != NULL) {
+		ufa_release_file_ref(current_file_ref);
+		current_file_ref = NULL;
+	}
+	unsaved_changes = false;
+
+	BLOG_INFO("Created a new system");
+}
+
+bco_static(new_system) {
+	bco_begin
+
+	if (unsaved_changes) {
+		bco_call(prompt_unsaved_changes);
+		if (save_prompt_result == SAVE_PROMPT_CANCEL) { bco_return(); }
+		if (save_prompt_result == SAVE_PROMPT_SAVE) {
+			bco_call(do_save_system, false);
+			if (!save_flow_succeeded) { bco_return(); }
+		}
+	}
+
+	reset_editor_system();
+
+	bco_end
+}
+
+static bool
 apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 	// Modules first, so the archetype rebuild below sees fresh definitions
 	int num_modules = grain_blueprint_num_modules(blueprint);
@@ -756,7 +876,7 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 	if (new_archetype == NULL) {
 		BLOG_ERROR("Could not rebuild archetype: %s", grain_get_last_error(grain));
 		show_error(grain_get_last_error(grain));
-		return;
+		return false;
 	}
 	archetype = new_archetype;
 
@@ -772,7 +892,7 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 	if (new_pool == NULL) {
 		BLOG_ERROR("Could not recreate pool: %s", grain_get_last_error(grain));
 		show_error(grain_get_last_error(grain));
-		return;
+		return false;
 	}
 	grain_destroy_pool(pool);
 	pool = new_pool;
@@ -795,15 +915,28 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 		grain_blueprint_name(blueprint),
 		info.num_emitters, info.num_affectors, info.renderer.name
 	);
+	return true;
 }
 
 bco_static(open_system) {
 	bco_vars(
 		barena_t arena;
 		ufa_open_file_t* open_file;
+		bool dialog_started;
 	)
 
 	bco_begin
+
+	if (unsaved_changes) {
+		bco_call(prompt_unsaved_changes);
+		if (save_prompt_result == SAVE_PROMPT_CANCEL) { bco_return(); }
+		if (save_prompt_result == SAVE_PROMPT_SAVE) {
+			bco_call(do_save_system, false);
+			if (!save_flow_succeeded) { bco_return(); }
+		}
+	}
+
+	bco_var(dialog_started) = true;
 	begin_native_modal();
 
 	barena_init(&bco_var(arena), bgame_arena_pool);
@@ -852,14 +985,23 @@ bco_static(open_system) {
 	if (blueprint == NULL) { bco_return(); }
 
 	remember_directory(&last_system_path, file_path);
-	apply_blueprint_to_editor(blueprint);
+	bool applied = apply_blueprint_to_editor(blueprint);
 	grain_destroy_blueprint(blueprint);
+
+	if (applied) {
+		if (current_file_ref != NULL) { ufa_release_file_ref(current_file_ref); }
+		current_file_ref = ufa_ref_open_file(bco_var(open_file));
+		unsaved_changes = false;
+	}
 
 	bco_end
 
-	ufa_end_open_file(bco_var(open_file));
-	barena_reset(&bco_var(arena));
-	end_native_modal();
+	// The unsaved-changes guard can return before any resource is acquired
+	if (bco_var(dialog_started)) {
+		ufa_end_open_file(bco_var(open_file));
+		barena_reset(&bco_var(arena));
+		end_native_modal();
+	}
 }
 
 static void
@@ -907,7 +1049,7 @@ init(void) {
 
 		grain = grain_create();
 
-		archetype_renderer = grain_define_renderer(
+		noop_renderer = grain_define_renderer(
 			grain,
 			"Renderer(Noop)\n"
 			"Requires(\n"
@@ -924,9 +1066,10 @@ init(void) {
 			"}\n"
 			"#endif"
 		);
-		if (archetype_renderer == NULL) {
+		if (noop_renderer == NULL) {
 			BLOG_FATAL("Could not define Noop renderer: %s", grain_get_last_error(grain));
 		}
+		archetype_renderer = noop_renderer;
 
 		archetype = grain_define_archetype(grain, "Editor", (grain_archetype_spec_t){
 			.emitters = archetype_emitters,
@@ -981,6 +1124,11 @@ cleanup(void) {
 	sfree(popup_error);
 	sfree(last_module_path);
 	sfree(last_system_path);
+
+	if (current_file_ref != NULL) {
+		ufa_release_file_ref(current_file_ref);
+		current_file_ref = NULL;
+	}
 }
 
 // The new pool is created before the old one is destroyed so that a rejected
@@ -1022,6 +1170,7 @@ recreate_pool(grain_archetype_info_t* archetype_info) {
 	current_lifetime_budget = pending_lifetime_budget;
 	current_max_emission_rate = pending_max_emission_rate;
 	current_max_burst_size = pending_max_burst_size;
+	unsaved_changes = true;
 
 	BLOG_INFO(
 		"Recreated pool: %.1f particles/s max, %.1fs lifetime budget, %d max burst",
@@ -1040,18 +1189,26 @@ update(void) {
 
 	if (ImGui_BeginMainMenuBar()) {
 		if (ImGui_BeginMenu("File")) {
-			if (ImGui_MenuItem("Import module")) {
-				start_modal_action(import_module);
+			if (ImGui_MenuItem("New")) {
+				start_modal_action(new_system);
+			}
+
+			if (ImGui_MenuItem("Open")) {
+				start_modal_action(open_system);
+			}
+
+			if (ImGui_MenuItem("Save")) {
+				start_modal_action(do_save_system, false);
+			}
+
+			if (ImGui_MenuItem("Save as")) {
+				start_modal_action(do_save_system, true);
 			}
 
 			ImGui_Separator();
 
-			if (ImGui_MenuItem("Open system")) {
-				start_modal_action(open_system);
-			}
-
-			if (ImGui_MenuItem("Save system")) {
-				start_modal_action(save_system);
+			if (ImGui_MenuItem("Import module")) {
+				start_modal_action(import_module);
 			}
 
 			ImGui_EndMenu();
@@ -1089,13 +1246,17 @@ update(void) {
 
 	if (show_system) {
 		if (ImGui_Begin("System", &show_system, ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui_InputText("Name", system_name.data, sizeof(system_name.data), 0);
+			if (ImGui_InputText("Name", system_name.data, sizeof(system_name.data), 0)) {
+				unsaved_changes = true;
+			}
 
-			ImGui_DragFloatEx(
+			if (ImGui_DragFloatEx(
 				"Emission rate", &emission_rate,
 				1.f, 0.f, current_max_emission_rate, "%.1f/s",
 				ImGuiSliderFlags_AlwaysClamp
-			);
+			)) {
+				unsaved_changes = true;
+			}
 
 			ImGui_BeginDisabled(current_max_burst_size == 0);
 			ImGui_DragIntEx(
@@ -1322,6 +1483,44 @@ update(void) {
 		ImGui_EndPopup();
 	}
 
+	if (should_prompt_unsaved) {
+		ImGui_OpenPopup("Unsaved changes", 0);
+		should_prompt_unsaved = false;
+		unsaved_prompt_active = true;
+	}
+
+	if (ImGui_BeginPopupModal(
+			"Unsaved changes",
+			NULL,
+			ImGuiWindowFlags_AlwaysAutoResize
+	)) {
+		ImGui_Text("Save changes to %s?", system_name.data);
+
+		if (ImGui_Button("Save")) {
+			save_prompt_result = SAVE_PROMPT_SAVE;
+			unsaved_prompt_active = false;
+			ImGui_CloseCurrentPopup();
+		}
+		ImGui_SameLine();
+		if (ImGui_Button("Don't save")) {
+			save_prompt_result = SAVE_PROMPT_DONT_SAVE;
+			unsaved_prompt_active = false;
+			ImGui_CloseCurrentPopup();
+		}
+		ImGui_SameLine();
+		if (ImGui_Button("Cancel")) {
+			save_prompt_result = SAVE_PROMPT_CANCEL;
+			unsaved_prompt_active = false;
+			ImGui_CloseCurrentPopup();
+		}
+
+		ImGui_EndPopup();
+	} else if (unsaved_prompt_active) {
+		// Dismissed without a choice (e.g. Escape)
+		save_prompt_result = SAVE_PROMPT_CANCEL;
+		unsaved_prompt_active = false;
+	}
+
 #ifndef __EMSCRIPTEN__
 	if (bresmon_should_reload(bresmon, false) > 0) {
 		bresmon_reload(bresmon);
@@ -1330,6 +1529,9 @@ update(void) {
 #endif
 
 	if (should_rebuild_archetype) {
+		// Composition or module sources changed; the saved file is stale either way
+		unsaved_changes = true;
+
 		grain_archetype_t* new_archetype = grain_define_archetype(grain, "Editor", (grain_archetype_spec_t){
 			.emitters = archetype_emitters,
 			.num_emitters = barray_len(archetype_emitters),
