@@ -6,6 +6,7 @@ Requires(
 
 Params(
 	@range(min = 0, step = 0.1)
+	@vector(angle = -1.5707963)
 	float gravity;
 )
 

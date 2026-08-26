@@ -7,6 +7,7 @@ Requires(
 
 Params(
 	@range(step=0.1)
+	@extent
 	vec2 size;
 	@color
 	uint color;

@@ -23,6 +23,8 @@
 #define UFA_ARENA_TYPE barena_t
 #include <ufa.h>
 
+#include "../debug_draw.h"
+
 #define start_modal_action(FN, ...) \
 	do { \
 		if (bco_status(modal_action) == BCO_TERMINATED) { \
@@ -913,6 +915,14 @@ show_module_params(
 			}
 		}
 
+		debug_draw_param(
+			particle_system,
+			archetype_info,
+			module,
+			param_index,
+			ImGui_IsItemHovered(0) || ImGui_IsItemActive()
+		);
+
 		if (updated) {
 			grain_parameter_modified(particle_system, param_index);
 			unsaved_changes = true;
@@ -1546,6 +1556,8 @@ update(void) {
 
 	ImGui_DockSpaceOverViewportEx(0, NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
 
+	debug_draw_begin();
+
 // Menu bar {{{
 	if (ImGui_BeginMainMenuBar()) {
 		if (ImGui_BeginMenu("File")) {
@@ -2010,6 +2022,8 @@ update(void) {
 	grain_begin_render(grain);
 	grain_render(particle_system);
 	grain_end_render(grain);
+
+	debug_draw_end();
 
 	cf_app_draw_onto_screen(false);
 }
