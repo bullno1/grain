@@ -496,6 +496,13 @@ bco_static(import_module) {
 		bco_yield();
 	}
 
+	ufa_status_t open_status = ufa_check_open_file(bco_var(open_file));
+	if (open_status == UFA_CANCELLED) { bco_return(); }
+	if (open_status == UFA_ERROR) {
+		show_error(ufa_get_open_file_error(bco_var(open_file)));
+		bco_return();
+	}
+
 	const char* source = read_open_file(bco_var(open_file));
 	if (source == NULL) {
 		show_error(ufa_get_open_file_error(bco_var(open_file)));
@@ -606,11 +613,10 @@ bco_static(save_system) {
 		bco_yield();
 	}
 
-	ufa_status_t status = ufa_check_save_file(bco_var(save_file));
-	if (status != UFA_OK) {
-		if (status != UFA_CANCELLED) {
-			show_error(ufa_get_save_file_error(bco_var(save_file)));
-		}
+	ufa_status_t save_status = ufa_check_save_file(bco_var(save_file));
+	if (save_status == UFA_CANCELLED) { bco_return(); }
+	if (save_status == UFA_ERROR) {
+		show_error(ufa_get_save_file_error(bco_var(save_file)));
 		bco_return();
 	}
 
@@ -804,6 +810,13 @@ bco_static(open_system) {
 
 	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
 		bco_yield();
+	}
+
+	ufa_status_t open_status = ufa_check_open_file(bco_var(open_file));
+	if (open_status == UFA_CANCELLED) { bco_return(); }
+	if (open_status == UFA_ERROR) {
+		show_error(ufa_get_open_file_error(bco_var(open_file)));
+		bco_return();
 	}
 
 	const char* content = read_open_file(bco_var(open_file));

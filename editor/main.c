@@ -48,8 +48,8 @@ static void
 init(int argc, const char** argv) {
 	// Cute Framework
 	if (!app_created) {
-		int width  = 800;
-		int height = 600;
+		int width  = 1280;
+		int height = 720;
 
 		BLOG_INFO("Creating app");
 		int options =
