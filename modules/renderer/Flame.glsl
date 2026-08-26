@@ -35,8 +35,7 @@ void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 		// Normalized age, assuming lifetimes are around `duration`
 		v_t = clamp(1.0 - particle.lifetime / params.duration, 0.0, 1.0);
 		vec2 corner = quad();
-		// The atlas is y-down while the quad is y-up
-		v_uv = vec2(corner.x + 0.5, 0.5 - corner.y);
+		v_uv = uv_quad(corner);
 		vec2 size = params.size * mix(1.0, params.end_scale, v_t);
 		gl_Position = grain_transform * vec4(particle.position + corner * size, 0.0, 1.0);
 	} else {

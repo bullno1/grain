@@ -80,6 +80,11 @@ vec2 quad() {
 	return corner - 0.5; // [-0.5, 0.5]
 }
 
+// Unit UV for the current quad corner, y-down to match texture space
+vec2 uv_quad(vec2 corner) {
+	return vec2(corner.x + 0.5, 0.5 - corner.y);
+}
+
 void cull() {
 	gl_Position = vec4(2.0, 2.0, 2.0, 0.0);
 }
