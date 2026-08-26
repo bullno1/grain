@@ -1777,6 +1777,7 @@ update(void) {
 	if (show_affectors) {
 		if (ImGui_Begin("Affectors", &show_affectors, ImGuiWindowFlags_AlwaysAutoResize)) {
 			int remove_index = -1;
+			int swap_index = -1;
 			for (int i = 0; i < archetype_info.num_affectors; ++i) {
 				ImGui_PushIDInt(i);
 
@@ -1789,6 +1790,20 @@ update(void) {
 					if (ImGui_Button("Remove")) {
 						remove_index = i;
 					}
+
+					ImGui_SameLine();
+					ImGui_BeginDisabled(i == 0);
+					if (ImGui_ArrowButton("move_up", ImGuiDir_Up)) {
+						swap_index = i - 1;
+					}
+					ImGui_EndDisabled();
+
+					ImGui_SameLine();
+					ImGui_BeginDisabled(i == archetype_info.num_affectors - 1);
+					if (ImGui_ArrowButton("move_down", ImGuiDir_Down)) {
+						swap_index = i;
+					}
+					ImGui_EndDisabled();
 				}
 
 				ImGui_PopID();
@@ -1796,6 +1811,13 @@ update(void) {
 
 			if (remove_index >= 0) {
 				barray_shift_remove(archetype_affectors, remove_index);
+				should_rebuild_archetype = true;
+			}
+
+			if (swap_index >= 0) {
+				grain_affector_t* tmp = archetype_affectors[swap_index];
+				archetype_affectors[swap_index] = archetype_affectors[swap_index + 1];
+				archetype_affectors[swap_index + 1] = tmp;
 				should_rebuild_archetype = true;
 			}
 
