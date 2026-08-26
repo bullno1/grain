@@ -1,10 +1,6 @@
 #include "grain/api.glsl"
 #include "archetype/render.glsl"
 
-layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
-	int grain_pool_size;
-};
-
 // Locations 14-15: reserved for grain, see render.vert.glsl.
 layout(location = 14) flat in uint grain_v_region;
 layout(location = 15) flat in uint grain_v_lid;

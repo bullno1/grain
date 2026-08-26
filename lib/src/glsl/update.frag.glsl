@@ -1,10 +1,6 @@
 #include "grain/api.glsl"
 #include "archetype/update.glsl"
 
-layout (set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {
-	int grain_pool_size;  // CF does not support uint uniform
-};
-
 void main() {
 	ivec2 texel = ivec2(gl_FragCoord.xy);
 	ivec2 size  = textureSize(grain_texture_0, 0);

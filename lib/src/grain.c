@@ -933,8 +933,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 
 	// User-visible sampler declarations: every stage declares every slot so the
 	// storage buffer bindings stay identical across passes; unused slots are
-	// simply fed the fallback texture. The uv rect maps a slot into its atlas
-	// region ((0,0)-(1,1) for a raw texture).
+	// simply fed the fallback texture.
 	for (int j = 0; j < num_user_samplers; ++j) {
 		sfmt_append(
 			archetype_attrs,
@@ -942,15 +941,16 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 			num_textures + j, j
 		);
 	}
+	sappend(
+		archetype_attrs,
+		"layout(set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {\n"
+		"\tint grain_pool_size;\n"
+		"\tmat4 grain_transform;\n"
+	);
 	if (num_user_samplers > 0) {
-		sfmt_append(
-			archetype_attrs,
-			"layout(set = GRAIN_UNIFORM_SET, binding = 1) uniform grain_sampler_uniforms {\n"
-			"\tvec4 grain_sampler_uv[%d];\n"
-			"};\n",
-			num_user_samplers
-		);
+		sfmt_append(archetype_attrs, "\tvec4 grain_sampler_uv[%d];\n", num_user_samplers);
 	}
+	sappend(archetype_attrs, "};\n");
 
 	// Attribute pack/unpack
 	for (int i = 0; i < num_textures; ++i) {
@@ -1890,6 +1890,15 @@ grain_touch(grain_pool_t* pool) {
 
 void
 grain_begin_update(grain_t* grain) {
+	// A pool queued outside a begin/end window (e.g. grain_burst before the first
+	// begin) would keep its queued flag while the list is dropped, starving it
+	// forever; unflag before dropping.
+	for (grain_pool_t* itr = grain->update_list; itr != NULL;) {
+		grain_pool_t* next = itr->update_next;
+		itr->update_next = NULL;
+		itr->queued_for_update = false;
+		itr = next;
+	}
 	grain->update_list = NULL;
 }
 
@@ -2152,6 +2161,13 @@ grain_end_update(grain_t* grain) {
 
 void
 grain_begin_render(grain_t* grain) {
+	// See grain_begin_update: drop stale queue entries without wedging the flag
+	for (grain_pool_t* itr = grain->render_list; itr != NULL;) {
+		grain_pool_t* next = itr->render_next;
+		itr->render_next = NULL;
+		itr->queued_for_render = false;
+		itr = next;
+	}
 	grain->render_list = NULL;
 }
 
@@ -2207,6 +2223,7 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool, CF_M3x2 transform) {
 	float transform_mat4[16];
 	grain_transform_to_mat4(transform, transform_mat4);
 	cf_material_set_uniform_vs(pool->material, "grain_transform", transform_mat4, CF_UNIFORM_TYPE_MAT4, 1);
+	cf_material_set_uniform_fs(pool->material, "grain_transform", transform_mat4, CF_UNIFORM_TYPE_MAT4, 1);
 
 	cf_material_set_render_state(pool->material, pool->render_state);
 	cf_apply_shader(pool->opts.archetype->shaders.render_shader, pool->material);
