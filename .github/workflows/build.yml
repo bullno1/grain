@@ -1,0 +1,117 @@
+---
+name: Build
+run-name: Build
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+on:
+  - push
+jobs:
+  steamrt:
+    name: SteamRT
+    runs-on: ubuntu-latest
+    container:
+      image: registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk:latest
+    steps:
+      - name: Install git-lfs
+        run: apt-get update && apt-get install -y --no-install-recommends git-lfs
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          create-symlink: true
+          key: ccache-${{ github.job }}
+          max-size: 16GB
+
+      - name: Build
+        env:
+          RELOADABLE: OFF
+        run: cmd/steamrt/build
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    env:
+      EM_VERSION: 6.0.0
+      EM_CACHE_FOLDER: 'emsdk-cache'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+
+      - name: Setup emscripten
+        uses: emscripten-core/setup-emsdk@v15
+        with:
+          version: ${{ env.EM_VERSION }}
+          actions-cache-folder: ${{ env.EM_CACHE_FOLDER }}
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          create-symlink: true
+          key: ccache-${{ github.job }}
+          max-size: 16GB
+
+      - name: Install CMake
+        uses: ssrobins/install-cmake@v1
+
+      - name: Prebuild emscripten libs
+        run: embuilder build libc sdl3
+
+      - name: Build
+        run: |
+          cmd/web/build
+          mv bin/web/RelWithDebInfo-static/grain-editor.html bin/web/RelWithDebInfo-static/index.html
+      - name: Upload static files as artifact
+        id: deployment
+        uses: actions/upload-pages-artifact@v3 # or specific "vX.X.X" version tag for this action
+        with:
+          path: bin/web/RelWithDebInfo-static/
+
+  win:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-${{ github.job }}
+          max-size: 16GB
+          variant: sccache
+
+      - name: Install CMake
+        uses: ssrobins/install-cmake@v1
+
+      - name: Build
+        env:
+          GENERATOR: "Ninja Multi-Config"
+        run: cmd/win/build.bat
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: web
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
