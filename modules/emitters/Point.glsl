@@ -11,7 +11,10 @@ Params(
 	@range(min=0, step=0.1)
 	float min_speed;
 	float max_speed;
+
+	@range(step = 0.0174533)
 	float min_angle;
+	@range(step = 0.0174533)
 	float max_angle;
 )
 

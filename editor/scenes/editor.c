@@ -470,6 +470,18 @@ remember_directory(char** dir_var, const char* file_path) {
 	}
 }
 
+// SDL reads the filter list when the dialog's callback fires, long after the
+// begin call has yielded out of the coroutine, so the filters cannot be
+// compound literals in the coroutine's (transient) stack frame
+static const ufa_filter_t module_file_filters[] = {
+	{ .name = "grain module", .pattern = "shd;glsl" },
+	{ .name = "All files", .pattern = "*" },
+};
+static const ufa_filter_t system_file_filters[] = {
+	{ .name = "grain system", .pattern = "json" },
+	{ .name = "All files", .pattern = "*" },
+};
+
 bco_static(import_module) {
 	bco_vars(
 		barena_t arena;
@@ -484,11 +496,8 @@ bco_static(import_module) {
 		.arena = &bco_var(arena),
 		.memalign = barena_memalign,
 		.parent_window = cf_app_get_window(),
-		.filters = (ufa_filter_t[]){
-			{ .name = "grain module", .pattern = "shd;glsl" },
-			{ .name = "All files", .pattern = "*" },
-		},
-		.num_filters = 2,
+		.filters = module_file_filters,
+		.num_filters = CF_ARRAY_SIZE(module_file_filters),
 		.directory = last_module_path,
 	});
 
@@ -601,11 +610,8 @@ bco_static(save_system) {
 		.arena = &bco_var(arena),
 		.memalign = barena_memalign,
 		.parent_window = cf_app_get_window(),
-		.filters = (ufa_filter_t[]){
-			{ .name = "grain system", .pattern = "json" },
-			{ .name = "All files", .pattern = "*" },
-		},
-		.num_filters = 2,
+		.filters = system_file_filters,
+		.num_filters = CF_ARRAY_SIZE(system_file_filters),
 		.directory = last_system_path,
 	});
 
@@ -800,11 +806,8 @@ bco_static(open_system) {
 		.arena = &bco_var(arena),
 		.memalign = barena_memalign,
 		.parent_window = cf_app_get_window(),
-		.filters = (ufa_filter_t[]){
-			{ .name = "grain system", .pattern = "json" },
-			{ .name = "All files", .pattern = "*" },
-		},
-		.num_filters = 2,
+		.filters = system_file_filters,
+		.num_filters = CF_ARRAY_SIZE(system_file_filters),
 		.directory = last_system_path,
 	});
 
