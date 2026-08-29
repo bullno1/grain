@@ -8,6 +8,8 @@
 #include <bgame/allocator/frame.h>
 #include <grain.h>
 #include <dcimgui.h>
+#undef IMGUI_STB_NAMESPACE
+#include <dcimgui_internal.h>
 #include <bco.h>
 #include <barray.h>
 #include <limits.h>
@@ -1564,7 +1566,33 @@ update(void) {
 	bool should_rebuild_archetype = false;
 	editor_command_t pending_command = CMD_NONE;
 
-	ImGui_DockSpaceOverViewportEx(0, NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
+	// Default layout
+	ImGuiID dockspace = ImGui_GetID("MainDockSpace");
+	if (ImGui_DockBuilderGetNode(dockspace) == NULL) {
+		BLOG_TRACE("Creating layout");
+		ImGui_DockBuilderAddNodeEx(dockspace, ImGuiDockNodeFlags_DockSpace);
+		ImGui_DockBuilderSetNodeSize(dockspace, ImGui_GetMainViewport()->WorkSize);
+
+		ImGuiID left, remain, right, center;
+		ImGuiID top, bottom;
+
+		ImGui_DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.25f, &left, &remain);
+		ImGui_DockBuilderSplitNode(remain, ImGuiDir_Right, 1.f / 3.f, &right, NULL);
+
+		ImGui_DockBuilderDockWindow("System", right);
+		ImGui_DockBuilderSplitNode(right, ImGuiDir_Down, 1.f / 3.f, &bottom, NULL);
+		ImGui_DockBuilderDockWindow("Log", bottom);
+
+		ImGui_DockBuilderSplitNode(left, ImGuiDir_Up, 1.f / 3.f, &top, &remain);
+		ImGui_DockBuilderSplitNode(remain, ImGuiDir_Down, 1.f / 2.f, &bottom, &center);
+
+		ImGui_DockBuilderDockWindow("Emitters", top);
+		ImGui_DockBuilderDockWindow("Affectors", center);
+		ImGui_DockBuilderDockWindow("Renderer", bottom);
+
+		ImGui_DockBuilderFinish(dockspace);
+	}
+	ImGui_DockSpaceOverViewportEx(dockspace, NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
 
 	debug_draw_begin();
 

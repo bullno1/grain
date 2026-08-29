@@ -7,6 +7,7 @@
 #include <cute.h>
 #include <SDL3/SDL_video.h>
 #include <stdio.h>
+#include <dcimgui.h>
 
 #ifdef __EMSCRIPTEN__
 #	include <emscripten/html5.h>
