@@ -1147,7 +1147,7 @@ reset_editor_system(void) {
 	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
 		.archetype = archetype,
 		.lifetime_budget = 16.f,
-		.max_emission_rate = 512.f,
+		.max_emission_rate = 480.f,
 		.max_burst_size = 256,
 		.max_systems = 1,
 	});
