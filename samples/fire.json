@@ -1,7 +1,7 @@
 {
 	"grain_version": 1,
 	"name": "Effect",
-	"emission_rate": 245.0,
+	"emission_rate": 188.0,
 	"pool": {
 		"max_systems": 1,
 		"max_emission_rate": 512.0,
@@ -13,13 +13,13 @@
 			"kind": "emitter",
 			"name": "Point",
 			"path": "/home/bullno1/Projects/grain/modules/emitters/Point.glsl",
-			"source": "Emitter(Point)\n\nRequires(\n\tvec2 position;\n\tvec2 velocity;\n)\n\nParams(\n\t@position\n\tvec2 position;\n\n\t@range(min=0, step=0.1)\n\tfloat min_speed;\n\tfloat max_speed;\n\n\t@range(step = 0.0174533)\n\t@arc(at=position, to=max_angle, inner=min_speed, outer=max_speed)\n\tfloat min_angle;\n\t@range(step = 0.0174533)\n\tfloat max_angle;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.position = params.position;\n\tfloat speed = mix(params.min_speed, params.max_speed, rand());\n\tfloat angle = mix(params.min_angle, params.max_angle, rand());\n\tparticle.velocity = vec2(cos(angle), sin(angle)) * speed;\n}\n"
+			"source": "Emitter(Point)\n\nRequires(\n\tvec2 position;\n\tvec2 velocity;\n)\n\nParams(\n\t@position\n\tvec2 position;\n\n\t@range(min=0, step=0.1)\n\tfloat min_speed;\n\tfloat max_speed;\n\n\t@range(step = 0.0174533)\n\t@arc(at=position, to=max_angle, inner=min_speed, outer=max_speed)\n\tfloat min_angle;\n\t@range(step = 0.0174533)\n\tfloat max_angle;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.position = params.position;\n\tfloat speed = rand_range(params.min_speed, params.max_speed);\n\tfloat angle = rand_range(params.min_angle, params.max_angle);\n\tparticle.velocity = unit_vec(angle) * speed;\n}\n"
 		},
 		{
 			"kind": "emitter",
 			"name": "Lifetime",
 			"path": "/home/bullno1/Projects/grain/modules/emitters/Lifetime.glsl",
-			"source": "Emitter(Lifetime)\n\nRequires(\n\tfloat lifetime;\n)\n\nParams(\n\t@range(min=0, step=0.1)\n\tfloat min_lifetime;\n\tfloat max_lifetime;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.lifetime = mix(params.min_lifetime, params.max_lifetime, rand());\n}\n"
+			"source": "Emitter(Lifetime)\n\nRequires(\n\tfloat lifetime;\n)\n\nParams(\n\t@range(min=0, step=0.1)\n\tfloat min_lifetime;\n\tfloat max_lifetime;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tparticle.lifetime = rand_range(params.min_lifetime, params.max_lifetime);\n}\n"
 		},
 		{
 			"kind": "affector",
@@ -31,13 +31,19 @@
 			"kind": "affector",
 			"name": "Wind",
 			"path": "/home/bullno1/Projects/grain/modules/affectors/Wind.glsl",
-			"source": "Affector(Wind)\n\nRequires(\n\tvec2 velocity;\n)\n\nParams(\n\t@vector(scale = 1)\n\tvec2 velocity;\n\n\t@range(min = 0, step = 0.1)\n\tfloat drag;\n\n\t@range(min = 0, max = 1, step = 0.01)\n\tfloat gustiness;\n\t@range(min = 0, step = 0.1)\n\tfloat gust_frequency;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// rand() is reseeded per particle each frame, so this is a stable phase\n\tfloat phase = rand() * 6.2831853;\n\tfloat gust = sin(ctx.time * params.gust_frequency + phase) * 0.6\n\t					 + sin(ctx.time * params.gust_frequency * 2.33 + phase * 1.7) * 0.4;\n\tvec2 wind = params.velocity * (1.0 + params.gustiness * gust);\n\tparticle.velocity += (wind - particle.velocity) * min(params.drag * ctx.dt, 1.0);\n}\n"
+			"source": "Affector(Wind)\n\nRequires(\n\tvec2 velocity;\n)\n\nParams(\n\t@vector(scale = 1)\n\tvec2 velocity;\n\n\t@range(min = 0, step = 0.1)\n\tfloat drag;\n\n\t@range(min = 0, max = 1, step = 0.01)\n\tfloat gustiness;\n\t@range(min = 0, step = 0.1)\n\tfloat gust_frequency;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// rand() is reseeded per particle each frame, so this is a stable phase\n\tfloat phase = rand() * TAU;\n\tfloat gust = sin(ctx.time * params.gust_frequency + phase) * 0.6\n\t					 + sin(ctx.time * params.gust_frequency * 2.33 + phase * 1.7) * 0.4;\n\tvec2 wind = params.velocity * (1.0 + params.gustiness * gust);\n\tparticle.velocity += (wind - particle.velocity) * min(params.drag * ctx.dt, 1.0);\n}\n"
 		},
 		{
 			"kind": "affector",
 			"name": "Flutter",
 			"path": "/home/bullno1/Projects/grain/modules/affectors/Flutter.glsl",
-			"source": "Affector(Flutter)\n\nRequires(\n\tvec2 velocity;\n)\n\nParams(\n\t@range(min = 0, step = 0.1)\n\tfloat strength;\n\n\t@range(min = 0, step = 0.1)\n\tfloat frequency;\n\n\t@range(min = 0, max = 1, step = 0.01)\n\tfloat variation;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// rand() is reseeded per particle each frame: stable phase/rate per flake\n\tfloat phase = rand() * 6.2831853;\n\tfloat freq	= params.frequency * mix(1.0, 0.5 + rand(), params.variation);\n\tfloat amp	 = params.strength	* mix(1.0, 0.5 + rand(), params.variation);\n\tparticle.velocity.x += sin(ctx.time * freq + phase) * amp * ctx.dt;\n}\n"
+			"source": "Affector(Flutter)\n\nRequires(\n\tvec2 velocity;\n)\n\nParams(\n\t@range(min = 0, step = 0.1)\n\tfloat strength;\n\n\t@range(min = 0, step = 0.1)\n\tfloat frequency;\n\n\t@range(min = 0, max = 1, step = 0.01)\n\tfloat variation;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\t// rand() is reseeded per particle each frame: stable phase/rate per flake\n\tfloat phase = rand() * TAU;\n\tfloat freq	= params.frequency * mix(1.0, 0.5 + rand(), params.variation);\n\tfloat amp	 = params.strength	* mix(1.0, 0.5 + rand(), params.variation);\n\tparticle.velocity.x += sin(ctx.time * freq + phase) * amp * ctx.dt;\n}\n"
+		},
+		{
+			"kind": "affector",
+			"name": "Fan",
+			"path": "/home/bullno1/Projects/grain/modules/affectors/Fan.glsl",
+			"source": "Affector(Fan)\n\nRequires(\n\tvec2 position;\n\tvec2 velocity;\n)\n\nParams(\n\t@position\n\tvec2 position;\n\n\t@range(min = 0, step = 0.1)\n\tfloat strength;\n\n\t@range(min = 0, step = 0.1)\n\tfloat min_range;\n\t@range(min = 0, step = 0.1)\n\tfloat max_range;\n\n\t@range(step = 0.0174533)\n\t@arc(at = position, to = max_angle, inner = min_range, outer = max_range)\n\tfloat min_angle;\n\t@range(step = 0.0174533)\n\tfloat max_angle;\n)\n\nvoid process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tvec2 d = particle.position - params.position;\n\tfloat dist = length(d);\n\tif (dist <= 0.0 || dist >= params.max_range) { return; }\n\n\tfloat mid = (params.min_angle + params.max_angle) * 0.5;\n\tfloat half_spread = (params.max_angle - params.min_angle) * 0.5;\n\tvec2 dir = d / dist;\n\tif (half_spread < PI && dot(dir, unit_vec(mid)) < cos(half_spread)) {\n\t\t\treturn;\n\t}\n\n\tfloat falloff = 1.0 - smoothstep(params.min_range, params.max_range, dist);\n\tparticle.velocity += dir * params.strength * falloff * ctx.dt;\n}\n"
 		},
 		{
 			"kind": "affector",
@@ -47,9 +53,9 @@
 		},
 		{
 			"kind": "renderer",
-			"name": "Flame",
-			"path": "/home/bullno1/Projects/grain/modules/renderer/Flame.glsl",
-			"source": "Renderer(Flame)\n\nRequires(\n\tvec2 position;\n\tfloat lifetime;\n)\n\nParams(\n\t@range(step = 0.1)\n\tvec2 size;\n\n\t@range(min = 0, step = 0.1)\n\tfloat duration;\n\n\t@range(min = 0, max = 2, step = 0.01)\n\tfloat end_scale;\n\n\t@color\n\tuint hot_color;\n\t@color\n\tuint cool_color;\n)\n\nSamplers(\n\tsampler2D image;\n)\n\n#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX\n\nVarying(2) vec2 v_uv;\nVarying(3) float v_t;\n\nvoid process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tif (particle.lifetime > 0.0) {\n\t\t// Normalized age, assuming lifetimes are around `duration`\n\t\tv_t = clamp(1.0 - particle.lifetime / params.duration, 0.0, 1.0);\n\t\tvec2 corner = quad();\n\t\tv_uv = uv_quad(corner);\n\t\tvec2 size = params.size * mix(1.0, params.end_scale, v_t);\n\t\tgl_Position = grain_transform * vec4(particle.position + corner * size, 0.0, 1.0);\n\t} else {\n\t\tcull();\n\t}\n}\n\n#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT\n\nVarying(2) vec2 v_uv;\nVarying(3) float v_t;\n\nvoid process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tvec4 tint = mix(unpackUnorm4x8(params.hot_color), unpackUnorm4x8(params.cool_color), v_t);\n\tgrain_Color = texture(image, atlas_uv(image_uvrect, v_uv)) * tint;\n\tgrain_Color.a *= clamp(particle.lifetime * 4.0, 0.0, 1.0);\n}\n\n#endif\n"
+			"name": "Circle",
+			"path": "/home/bullno1/Projects/grain/modules/renderer/Circle.glsl",
+			"source": "Renderer(Circle)\n\nRequires(\n\tvec2 position;\n\tfloat lifetime;\n)\n\nParams(\n\t@range(min = 0, step = 0.1)\n\tfloat radius;\n\n\t@range(min = 0, step = 0.1)\n\tfloat glow;\n\n\t@color\n\tuint start_color;\n\n\t@color\n\tuint end_color;\n)\n\nVarying(0) vec2 v_p;\nVarying(1) vec2 v_half_size;\n\n// The glow skirt never reaches zero: pad the quad by several falloffs and\n// window the skirt to zero at its edge (plus a small AA margin for the rim)\nconst float GLOW_PAD = 3.0;\n\n#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX\n\nvoid process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tif (particle.lifetime > 0.0) {\n\t\tv_half_size = vec2(params.radius + params.glow * GLOW_PAD) * 1.05;\n\t\tv_p = sdf_quad(v_half_size);\n\t\tgl_Position = grain_transform * vec4(particle.position + v_p, 0.0, 1.0);\n\t} else {\n\t\tcull();\n\t}\n}\n\n#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT\n\nvoid process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n\tfloat d = sd_circle(v_p, params.radius);\n\n\tvec2 q = clamp(abs(v_p) / v_half_size, 0.0, 1.0);\n\tfloat window = (1.0 - q.x * q.x) * (1.0 - q.y * q.y);\n\n\t// Crisp AA disc; the glow skirt takes over past the rim\n\tfloat a = max(\n\t\tsdf_mask(d),\n\t\tsdf_glow(d, max(params.glow, 0.0001)) * window\n\t);\n\n\tvec4 c = unpackUnorm4x8(params.start_color);\n\tvec4 c2 = unpackUnorm4x8(params.end_color);\n\tvec4 target_color = mix(c2, c, particle.lifetime / 6.0);\n\ttarget_color.a *= a;\n\tgrain_Color = premultiply(target_color);\n\tgrain_Color.a = 0.0;\n}\n\n#endif\n"
 		}
 	],
 	"archetype": {
@@ -95,8 +101,22 @@
 				"module": "Flutter",
 				"params": {
 					"strength": 200.0,
-					"frequency": 8.7,
-					"variation": 0.719
+					"frequency": 6.2,
+					"variation": 0.625
+				}
+			},
+			{
+				"module": "Fan",
+				"params": {
+					"position": [
+						-151.65787,
+						55.06909
+					],
+					"strength": 1124.1,
+					"min_range": 64.1,
+					"max_range": 203.5,
+					"min_angle": -0.314,
+					"max_angle": 0.298
 				}
 			},
 			{
@@ -104,16 +124,12 @@
 			}
 		],
 		"renderer": {
-			"module": "Flame",
+			"module": "Circle",
 			"params": {
-				"size": [
-					16.0,
-					16.0
-				],
-				"duration": 2.3,
-				"end_scale": 0.0,
-				"hot_color": 4278255607,
-				"cool_color": 4278190335
+				"radius": 1.5,
+				"glow": 11.9,
+				"start_color": 4278254847,
+				"end_color": 167706669
 			}
 		}
 	}

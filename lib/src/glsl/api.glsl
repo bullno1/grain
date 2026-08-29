@@ -123,3 +123,5 @@ void cull() {
 vec4 grain_Color;
 
 #endif
+
+#include "grain/sdf.glsl"
