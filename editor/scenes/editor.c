@@ -52,14 +52,8 @@ SCENE_VAR(bool, show_system)
 SCENE_VAR(float, emission_rate)
 SCENE_VAR(int, burst_count)
 
-// The pool options in effect; grain_pool_t is opaque so the editor tracks them
-SCENE_VAR(float, current_lifetime_budget)
-SCENE_VAR(float, current_max_emission_rate)
-SCENE_VAR(int, current_max_burst_size)
-// Edited in the System window, applied only when the pool is recreated
-SCENE_VAR(float, pending_lifetime_budget)
-SCENE_VAR(float, pending_max_emission_rate)
-SCENE_VAR(int, pending_max_burst_size)
+SCENE_VAR(grain_pool_opts_t, current_pool_opts)
+SCENE_VAR(grain_pool_opts_t, pending_pool_opts)
 
 // }}}
 
@@ -78,6 +72,13 @@ typedef struct {
 typedef struct {
 	char data[128];
 } system_name_t;
+
+static const grain_pool_opts_t DEFAULT_POOL_OPTS = {
+	.lifetime_budget = 16.f,
+	.max_emission_rate = 480.f,
+	.max_burst_size = 256,
+	.max_systems = 1,
+};
 
 SCENE_VAR(grain_t*, grain)
 SCENE_VAR(char*, tmp_source_buf)
@@ -702,9 +703,9 @@ static void
 recreate_pool(grain_archetype_info_t* archetype_info) {
 	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
 		.archetype = archetype,
-		.lifetime_budget = pending_lifetime_budget,
-		.max_emission_rate = pending_max_emission_rate,
-		.max_burst_size = pending_max_burst_size,
+		.lifetime_budget = pending_pool_opts.lifetime_budget,
+		.max_emission_rate = pending_pool_opts.max_emission_rate,
+		.max_burst_size = pending_pool_opts.max_burst_size,
 		.max_systems = 1,
 	});
 	if (new_pool == NULL) {
@@ -732,14 +733,12 @@ recreate_pool(grain_archetype_info_t* archetype_info) {
 	pool = new_pool;
 	particle_system = new_system;
 
-	current_lifetime_budget = pending_lifetime_budget;
-	current_max_emission_rate = pending_max_emission_rate;
-	current_max_burst_size = pending_max_burst_size;
+	current_pool_opts = pending_pool_opts;
 	unsaved_changes = true;
 
 	BLOG_INFO(
 		"Recreated pool: %.1f particles/s max, %.1fs lifetime budget, %d max burst",
-		current_max_emission_rate, current_lifetime_budget, current_max_burst_size
+		current_pool_opts.max_emission_rate, current_pool_opts.lifetime_budget, current_pool_opts.max_burst_size
 	);
 }
 
@@ -1148,10 +1147,11 @@ reset_editor_system(void) {
 
 	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
 		.archetype = archetype,
-		.lifetime_budget = 16.f,
-		.max_emission_rate = 480.f,
-		.max_burst_size = 256,
 		.max_systems = 1,
+
+		.lifetime_budget = DEFAULT_POOL_OPTS.lifetime_budget,
+		.max_emission_rate = DEFAULT_POOL_OPTS.max_emission_rate,
+		.max_burst_size = DEFAULT_POOL_OPTS.max_burst_size,
 	});
 	if (new_pool == NULL) {
 		BLOG_ERROR("Could not recreate pool: %s", grain_get_last_error(grain));
@@ -1164,9 +1164,7 @@ reset_editor_system(void) {
 
 	emission_rate = 10.f;
 	burst_count = 50;
-	current_lifetime_budget = pending_lifetime_budget = 16.f;
-	current_max_emission_rate = pending_max_emission_rate = 480.f;
-	current_max_burst_size = pending_max_burst_size = 256;
+	current_pool_opts = pending_pool_opts = DEFAULT_POOL_OPTS;
 	snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
 	if (current_file_ref != NULL) {
@@ -1295,9 +1293,7 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 	pool = new_pool;
 	particle_system = grain_create_system(new_pool);
 
-	current_lifetime_budget = pending_lifetime_budget = loaded_opts.lifetime_budget;
-	current_max_emission_rate = pending_max_emission_rate = loaded_opts.max_emission_rate;
-	current_max_burst_size = pending_max_burst_size = loaded_opts.max_burst_size;
+	current_pool_opts = pending_pool_opts = loaded_opts;
 
 	// Texture bindings: the blueprint carries paths only
 	clear_texture_bindings();
@@ -1469,9 +1465,7 @@ init(void) {
 
 		emission_rate = 10.f;
 		burst_count = 50;
-		current_lifetime_budget = pending_lifetime_budget = 16.f;
-		current_max_emission_rate = pending_max_emission_rate = 512.f;
-		current_max_burst_size = pending_max_burst_size = 256;
+		current_pool_opts = pending_pool_opts = DEFAULT_POOL_OPTS;
 		snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
 		grain = grain_create();
@@ -1513,9 +1507,9 @@ init(void) {
 
 		pool = grain_create_pool(grain, (grain_pool_opts_t){
 			.archetype = archetype,
-			.lifetime_budget = current_lifetime_budget,
-			.max_emission_rate = current_max_emission_rate,
-			.max_burst_size = current_max_burst_size,
+			.lifetime_budget = DEFAULT_POOL_OPTS.lifetime_budget,
+			.max_emission_rate = DEFAULT_POOL_OPTS.max_emission_rate,
+			.max_burst_size = DEFAULT_POOL_OPTS.max_burst_size,
 			.max_systems = 1,
 		});
 
@@ -1706,53 +1700,55 @@ update(void) {
 
 			if (ImGui_DragFloatEx(
 				"Emission rate", &emission_rate,
-				1.f, 0.f, current_max_emission_rate, "%.1f/s",
+				1.f, 0.f, current_pool_opts.max_emission_rate, "%.1f/s",
 				ImGuiSliderFlags_AlwaysClamp
 			)) {
 				unsaved_changes = true;
 			}
 
-			ImGui_BeginDisabled(current_max_burst_size == 0);
+			ImGui_BeginDisabled(current_pool_opts.max_burst_size == 0);
 			ImGui_DragIntEx(
 				"Burst count", &burst_count,
-				1.f, 1, current_max_burst_size > 0 ? current_max_burst_size : 1, "%d",
+				1.f, 1, current_pool_opts.max_burst_size > 0 ? current_pool_opts.max_burst_size : 1, "%d",
 				ImGuiSliderFlags_AlwaysClamp
 			);
 			if (ImGui_Button("Burst")) {
 				grain_burst(particle_system, burst_count);
 			}
 			ImGui_EndDisabled();
-			if (current_max_burst_size == 0) {
+			if (current_pool_opts.max_burst_size == 0) {
 				ImGui_SameLine();
 				ImGui_TextDisabledUnformatted("Set a max burst size to enable");
 			}
 
 			ImGui_SeparatorText("Pool");
 			ImGui_DragFloatEx(
-				"Lifetime budget", &pending_lifetime_budget,
+				"Lifetime budget", &pending_pool_opts.lifetime_budget,
 				0.1f, 0.1f, FLT_MAX, "%.1fs",
 				ImGuiSliderFlags_AlwaysClamp
 			);
 			ImGui_DragFloatEx(
-				"Max emission rate", &pending_max_emission_rate,
+				"Max emission rate", &pending_pool_opts.max_emission_rate,
 				1.f, 1.f, FLT_MAX, "%.1f/s",
 				ImGuiSliderFlags_AlwaysClamp
 			);
 			ImGui_DragIntEx(
-				"Max burst size", &pending_max_burst_size,
+				"Max burst size", &pending_pool_opts.max_burst_size,
 				1.f, 0, INT_MAX, "%d",
 				ImGuiSliderFlags_AlwaysClamp
 			);
 			ImGui_TextDisabled(
 				"Pool capacity: %d particles",
-				(int)ceilf(pending_max_emission_rate * pending_lifetime_budget)
-					+ pending_max_burst_size
+				(int)ceilf(pending_pool_opts.max_emission_rate * pending_pool_opts.lifetime_budget)
+					+ pending_pool_opts.max_burst_size
 			);
 
 			bool pool_dirty =
-				pending_lifetime_budget != current_lifetime_budget
-				|| pending_max_emission_rate != current_max_emission_rate
-				|| pending_max_burst_size != current_max_burst_size;
+				pending_pool_opts.lifetime_budget != current_pool_opts.lifetime_budget
+				||
+				pending_pool_opts.max_emission_rate != current_pool_opts.max_emission_rate
+				||
+				pending_pool_opts.max_burst_size != current_pool_opts.max_burst_size;
 			ImGui_BeginDisabled(!pool_dirty);
 			if (ImGui_Button("Apply")) {
 				recreate_pool(&archetype_info);
