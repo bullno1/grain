@@ -2,6 +2,7 @@ set(SOURCES
 	"main.c"
 	"libs.c"
 	"debug_draw.c"
+	"pref.c"
 
 	"scenes/particle.c"
 	"scenes/editor.c"

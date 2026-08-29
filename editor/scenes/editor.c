@@ -16,6 +16,7 @@
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
+#include "../pref.h"
 
 #ifndef __EMSCRIPTEN__
 #	define BRESMON_API static
@@ -1425,6 +1426,50 @@ bco_static(open_system) {
 
 // }}}
 
+// Preferences {{{
+
+static const grain_pref_section_t PREF_SECTIONS[] = {
+	{
+		.name = "windows",
+		.keys = (grain_pref_key_t[]){
+			grain_pref_key_ex(show_system, "system"),
+			grain_pref_key_ex(show_log, "log"),
+			grain_pref_key_ex(show_emitters, "emitters"),
+			grain_pref_key_ex(show_affectors, "affectors"),
+			grain_pref_key_ex(show_renderer, "renderer"),
+			{}
+		},
+	},
+	{
+		.name = "last_paths",
+		.keys = (grain_pref_key_t[]){
+			grain_pref_key_ex(last_system_path, "system"),
+			grain_pref_key_ex(last_module_path, "module"),
+			{}
+		},
+	},
+	{}
+};
+
+static void
+load_prefs(void) {
+	CF_JDoc pref_doc = cf_make_json_from_file("/user/prefs.json");
+	grain_load_prefs(PREF_SECTIONS, cf_json_get_root(pref_doc));
+	cf_destroy_json(pref_doc);
+}
+
+static void
+save_prefs(void) {
+	CF_JDoc pref_doc = cf_make_json(NULL, 0);
+	cf_json_set_root(pref_doc, grain_save_prefs(PREF_SECTIONS, pref_doc));
+	char* pref_string = cf_json_to_string(pref_doc);
+	cf_fs_write_string_to_file("prefs.json", pref_string);
+	sfree(pref_string);
+	cf_destroy_json(pref_doc);
+}
+
+// }}}
+
 // Scene lifecycle {{{
 
 static void
@@ -1518,11 +1563,14 @@ init(void) {
 #ifndef __EMSCRIPTEN__
 		bresmon = bresmon_create(scene_allocator);
 #endif
+
+		load_prefs();
 	}
 }
 
 static void
 cleanup(void) {
+	save_prefs();
 	log_sink_active = false;
 
 	grain_destroy_pool(pool);

@@ -90,6 +90,9 @@ init(int argc, const char** argv) {
 		snprintf(s_ini_path, sizeof(s_ini_path), "%simgui.ini", user_dir);
 		ImGui_GetIO()->IniFilename = s_ini_path;
 
+		cf_fs_mount(user_dir, "/user", true);
+		cf_fs_set_write_directory(user_dir);
+
 		bgame_push_scene("editor");
 
 		app_created = true;
