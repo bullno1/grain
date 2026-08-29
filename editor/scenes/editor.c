@@ -1165,7 +1165,7 @@ reset_editor_system(void) {
 	emission_rate = 10.f;
 	burst_count = 50;
 	current_lifetime_budget = pending_lifetime_budget = 16.f;
-	current_max_emission_rate = pending_max_emission_rate = 512.f;
+	current_max_emission_rate = pending_max_emission_rate = 480.f;
 	current_max_burst_size = pending_max_burst_size = 256;
 	snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
