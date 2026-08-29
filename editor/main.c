@@ -83,6 +83,11 @@ init(int argc, const char** argv) {
 #endif
 
 		cf_app_init_imgui();
+		static char s_ini_path[1024];
+		// after cf_app_init_imgui(), before the main loop:
+		const char* user_dir = cf_fs_get_user_directory("bullno1", "grain");
+		snprintf(s_ini_path, sizeof(s_ini_path), "%simgui.ini", user_dir);
+		ImGui_GetIO()->IniFilename = s_ini_path;
 
 		bgame_push_scene("editor");
 
