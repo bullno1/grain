@@ -88,7 +88,7 @@ init(int argc, const char** argv) {
 		// after cf_app_init_imgui(), before the main loop:
 		const char* user_dir = cf_fs_get_user_directory("bullno1", "grain");
 		snprintf(s_ini_path, sizeof(s_ini_path), "%simgui.ini", user_dir);
-		ImGui_GetIO()->IniFilename = s_ini_path;
+		ImGui_GetIO()->IniFilename = sintern(s_ini_path);  // the path gets clobbered on reload
 
 		cf_fs_mount(user_dir, "/user", true);
 		cf_fs_set_write_directory(user_dir);
