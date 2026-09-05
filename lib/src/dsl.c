@@ -83,14 +83,6 @@ grain_dsl_collect_vars(
 	return true;
 }
 
-static const char*
-grain_dsl_materialize(grain_t* grain, xincbin_data_t incbin) {
-	char* data = cf_arena_alloc(&grain->arena, incbin.size + 1);
-	memcpy(data, incbin.data, incbin.size);
-	data[incbin.size] = '\0';
-	return data;
-}
-
 static CSPV_Result
 grain_dsl_compile(
 	grain_t* grain,
@@ -347,15 +339,15 @@ grain_dsl_parse_module(
 	grain_vfs_entry_t vfs[] = {
 		{
 			.name = "grain/api.glsl",
-			.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_api)),
+			.content = (const char*)XINCBIN_GET(grain_api).data,
 		},
 		{
 			.name = "grain/sdf.glsl",
-			.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_sdf)),
+			.content = (const char*)XINCBIN_GET(grain_sdf).data,
 		},
 		{
 			.name = "grain/internal.glsl",
-			.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_internal)),
+			.content = (const char*)XINCBIN_GET(grain_internal).data,
 		},
 		{
 			.name = "grain/samplers.glsl",
@@ -373,7 +365,7 @@ grain_dsl_parse_module(
 		vfs,
 		stage,
 		GRAIN_COMPILE_INSPECT,
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_inspect_stub))
+		(const char*)XINCBIN_GET(grain_inspect_stub).data
 	);
 
 	if (!inspect_result.success) {
@@ -518,15 +510,15 @@ grain_dsl_compile_archetype(
 	}
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
 		.name = "grain/api.glsl",
-		.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_api)),
+		.content = (const char*)XINCBIN_GET(grain_api).data,
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
 		.name = "grain/sdf.glsl",
-		.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_sdf)),
+		.content = (const char*)XINCBIN_GET(grain_sdf).data,
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
 		.name = "grain/internal.glsl",
-		.content = grain_dsl_materialize(grain, XINCBIN_GET(grain_internal)),
+		.content = (const char*)XINCBIN_GET(grain_internal).data,
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
 		.name = grain_sprintf(grain, "renderer/%s", ((grain_module_t*)spec.renderer)->info->name),
@@ -560,7 +552,7 @@ grain_dsl_compile_archetype(
 		grain,
 		vfs_entries,
 		CSPV_STAGE_FRAGMENT,
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_update_fs)),
+		(const char*)XINCBIN_GET(grain_update_fs).data,
 		&update_fs_bytecode
 	)) {
 		goto fail;
@@ -570,7 +562,7 @@ grain_dsl_compile_archetype(
 		grain,
 		vfs_entries,
 		CSPV_STAGE_VERTEX,
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_render_vs)),
+		(const char*)XINCBIN_GET(grain_render_vs).data,
 		&render_vs_bytecode
 	)) {
 		goto fail;
@@ -580,7 +572,7 @@ grain_dsl_compile_archetype(
 		grain,
 		vfs_entries,
 		CSPV_STAGE_FRAGMENT,
-		grain_dsl_materialize(grain, XINCBIN_GET(grain_render_fs)),
+		(const char*)XINCBIN_GET(grain_render_fs).data,
 		&render_fs_bytecode
 	)) {
 		goto fail;
