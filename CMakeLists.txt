@@ -22,6 +22,8 @@ add_subdirectory(deps)
 # Then everything else to avoid leaking into deps
 
 include("deps/bgame/bgame.cmake")
+include("cmake/grainc.cmake")
 add_subdirectory(lib)
 add_subdirectory(editor)
+add_subdirectory(grainc)
 add_subdirectory(tests)

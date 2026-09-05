@@ -7,44 +7,6 @@
 // RGBA32F
 #define GRAIN_TEXTURE_CAPACITY (sizeof(float) * 4)
 
-struct grain_archetype_s {
-	grain_archetype_spec_t spec;
-	grain_dsl_archetype_shaders_t shaders;
-	bool own_bytecode;
-
-	CK_DYNA grain_module_info_t* emitters;
-	CK_DYNA grain_module_info_t* affectors;
-	        grain_module_info_t  renderer;
-	CK_DYNA grain_param_info_t* params;
-	CK_DYNA int* params_offsets;
-
-	// Sampler slots in canonical order (emitters, affectors, renderer); slot j
-	// is bound as `grain_sampler_<j>` at binding num_textures + j.
-	CK_DYNA grain_sampler_info_t* samplers;
-	// Parallel to `samplers`: interned owning-module names, for binding
-	// migration and blueprint capture.
-	CK_DYNA const char** sampler_module_names;
-
-	// Deep copies of module decorators: the archetype outlives module
-	// redefinitions. Exact-size so the pointers handed out never move.
-	grain_param_decorator_t* param_decorators;
-	grain_decorator_arg_t* param_decorator_args;
-
-	int num_textures;
-	int update_size;
-	int render_size;
-
-	// Texture/channel of the hidden birth-time lane (see grain_define_archetype).
-	int birth_texture;
-	int birth_channel;
-
-	// Bumped on every redefinition.
-	uint32_t revision;
-
-	// Hash of the attribute list (name, type)
-	uint64_t attr_layout_hash;
-};
-
 struct grain_system_s {
 	grain_pool_t* pool;
 };
@@ -141,7 +103,7 @@ grain_free_modules(CK_MAP(grain_module_t*)* module_store) {
 	map_free(*module_store);
 }
 
-static void
+void
 grain_cleanup_archetype(grain_archetype_t* archetype) {
 	if (archetype->own_bytecode) {
 		grain_dsl_free_bytecode(archetype->shaders.update_frag_bytecode);
@@ -163,6 +125,20 @@ grain_cleanup_archetype(grain_archetype_t* archetype) {
 	if (archetype->shaders.render_shader.id != 0) {
 		cf_destroy_shader(archetype->shaders.render_shader);
 	}
+}
+
+grain_archetype_t*
+grain_upsert_archetype(grain_t* grain, const char* interned_name, uint32_t* out_revision) {
+	grain_archetype_t* archetype = map_get(grain->archetypes, interned_name);
+	if (archetype == NULL) {
+		archetype = cf_alloc(sizeof(grain_archetype_t));
+		map_set(grain->archetypes, interned_name, archetype);
+		*out_revision = 1;
+	} else {
+		grain_cleanup_archetype(archetype);
+		*out_revision = archetype->revision + 1;
+	}
+	return archetype;
 }
 
 void
@@ -1296,17 +1272,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		goto fail;
 	}
 
-	const char* interned_name = sintern(name);
-	archetype = map_get(grain->archetypes, interned_name);
 	uint32_t revision;
-	if (archetype == NULL) {
-		archetype = cf_alloc(sizeof(grain_archetype_t));
-		map_set(grain->archetypes, interned_name, archetype);
-		revision = 1;
-	} else {
-		grain_cleanup_archetype(archetype);
-		revision = archetype->revision + 1;
-	}
+	archetype = grain_upsert_archetype(grain, sintern(name), &revision);
 
 	*archetype = (grain_archetype_t){
 		.spec = spec,

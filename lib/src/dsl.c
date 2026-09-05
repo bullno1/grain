@@ -308,6 +308,11 @@ grain_dsl_free_bytecode(CF_ShaderBytecode bytecode) {
 	cf_free((void*)bytecode.content);
 }
 
+CF_ShaderBytecode
+grain_dsl_builtin_update_vert(void) {
+	return grain_update_vert_bytecode;
+}
+
 grain_dsl_module_info_t*
 grain_dsl_parse_module(
 	grain_t* grain,

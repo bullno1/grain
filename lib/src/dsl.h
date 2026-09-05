@@ -56,6 +56,11 @@ grain_dsl_compile_archetype(
 void
 grain_dsl_free_bytecode(CF_ShaderBytecode bytecode);
 
+//! The prebaked bytecode of the shared update vertex shader (a fullscreen
+//! stub); the incbin'd constant itself is private to dsl.c
+CF_ShaderBytecode
+grain_dsl_builtin_update_vert(void);
+
 static inline void
 grain_dsl_free_module_info(grain_dsl_module_info_t* module_info) {
 	if (module_info == NULL) { return; }

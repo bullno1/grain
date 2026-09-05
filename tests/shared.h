@@ -8,9 +8,9 @@
 /**
  * A grain_t without any GPU resources.
  *
- * Module definition only needs the arena (shader compilation is CPU-side via
- * cute-spirv), so everything up to grain_define_* is testable headlessly.
- * Archetypes and pools create GPU objects and are out of reach here.
+ * Module and archetype definition only need the arena (shader compilation is
+ * CPU-side via cute-spirv); headless skips just the GPU shader objects. Pools
+ * create GPU resources and are out of reach here.
  */
 static grain_t test_grain_storage;
 
