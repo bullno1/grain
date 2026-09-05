@@ -6,10 +6,12 @@
 #include <bgame/utils.h>
 #include <bgame/allocator.h>
 #include <bgame/allocator/frame.h>
+#include <bgame/reloadable.h>
 #include <grain.h>
 #include <dcimgui.h>
 #undef IMGUI_STB_NAMESPACE
 #include <dcimgui_internal.h>
+#define BCO_WRAPPER BGAME_FN_WRAPPER
 #include <bco.h>
 #include <barray.h>
 #include <limits.h>
@@ -24,6 +26,7 @@
 #endif
 
 #define UFA_ARENA_TYPE barena_t
+#define UFA_FN_WRAPPER BGAME_FN_WRAPPER
 #include <ufa.h>
 
 #include "../debug_draw.h"

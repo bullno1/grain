@@ -1,2 +1,2 @@
-#define BLIB_IMPLEMENTATION
+#define BCO_IMPLEMENTATION
 #include <bco.h>
