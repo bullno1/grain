@@ -122,15 +122,13 @@ cleanup(void) {
 	bgame_enumerate_tracked_allocators(report_allocator_stats, NULL);
 }
 
-static void
-after_reload(void) {
-	bgame_scene_after_reload();
-}
-
 BGAME_APP {
 	.init = init,
 	.cleanup = cleanup,
 	.update = update,
+
+	// Defer to scene manager
+	.check_reload = bgame_scene_check_reload,
 	.before_reload = bgame_scene_before_reload,
-	.after_reload = after_reload,
+	.after_reload = bgame_scene_after_reload,
 };

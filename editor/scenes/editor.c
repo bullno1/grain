@@ -26,17 +26,9 @@
 #endif
 
 #define UFA_ARENA_TYPE barena_t
-#define UFA_FN_WRAPPER BGAME_FN_WRAPPER
 #include <ufa.h>
 
 #include "../debug_draw.h"
-
-#define start_modal_action(FN, ...) \
-	do { \
-		if (bco_status(modal_action) == BCO_TERMINATED) { \
-			bco_spawn(modal_action, FN, __VA_ARGS__); \
-		} \
-	} while (0)
 
 // States
 
@@ -132,30 +124,20 @@ SCENE_VAR(char*, last_texture_path)
 
 SCENE_VAR(char*, popup_error)
 SCENE_VAR(char*, attributions_text)
+SCENE_VAR(bco_t*, modal_action)
+SCENE_VAR(barena_t, modal_arena)
 
-static _Alignas(bco_align_t) char modal_action_storage[2048];
-static bco_t* modal_action = (bco_t*)modal_action_storage;
-static bgame_reload_block_t modal_block = { 0 };
+typedef enum {
+	MODAL_PROMPT_RESULT_CANCEL,
+	MODAL_PROMPT_RESULT_YES,
+	MODAL_PROMPT_RESULT_NO,
+} modal_prompt_result_t;
 
 static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
 
 static bool should_popup_error = false;
 static bool should_popup_about = false;
-
-typedef enum {
-	SAVE_PROMPT_PENDING,
-	SAVE_PROMPT_SAVE,
-	SAVE_PROMPT_DONT_SAVE,
-	SAVE_PROMPT_CANCEL,
-} save_prompt_result_t;
-
-static bool should_prompt_unsaved = false;
-static bool unsaved_prompt_active = false;
-static save_prompt_result_t save_prompt_result = SAVE_PROMPT_CANCEL;
-
-// Result of the last do_save_system run, for callers that chain on it
-static bool save_flow_succeeded = false;
 
 // Menu items and shortcut keys funnel into one of these each frame
 typedef enum {
@@ -243,14 +225,10 @@ static void
 begin_native_modal(void) {
 	should_begin_native_modal = true;
 	should_end_native_modal = false;
-
-	modal_block = bgame_block_reload();
 }
 
 static void
 end_native_modal(void) {
-	bgame_unblock_reload(modal_block);
-
 	should_end_native_modal = true;
 }
 
@@ -259,6 +237,87 @@ show_error(const char* error) {
 	sset(popup_error, error);
 	should_popup_error = true;
 }
+
+bco_static(
+	modal_prompt,
+	const char* title,
+	const char* question,
+	const char* yes,
+	const char* no,
+	const char* cancel,
+	modal_prompt_result_t* result
+) {
+	bco_vars(
+		modal_prompt_result_t result;
+		bool pending;
+	)
+	bco_yield_points(
+		WAIT_FOR_ANSWER
+	)
+
+	bco_begin
+
+	// Copy into arena for stable pointer
+	bco_arg(title) = bgame_arena_strcpy(&modal_arena, bco_arg(title));
+	bco_arg(question) = bgame_arena_strcpy(&modal_arena, bco_arg(question));
+	bco_arg(yes) = bgame_arena_strcpy(&modal_arena, bco_arg(yes));
+	bco_arg(no) = bgame_arena_strcpy(&modal_arena, bco_arg(no));
+	bco_arg(cancel) = bgame_arena_strcpy(&modal_arena, bco_arg(cancel));
+
+	bco_var(result) = MODAL_PROMPT_RESULT_CANCEL;
+	bco_var(pending) = true;
+	ImGui_OpenPopup(bco_arg(title), 0);
+
+	do {
+		if (ImGui_BeginPopupModal(
+			bco_arg(title),
+			NULL,
+			ImGuiWindowFlags_AlwaysAutoResize
+		)) {
+			ImGui_Text("%s", bco_arg(question));
+
+			if (ImGui_Button(bco_arg(yes))) {
+				bco_var(result) = MODAL_PROMPT_RESULT_YES;
+				ImGui_CloseCurrentPopup();
+				bco_var(pending) = false;
+			}
+
+			ImGui_SameLine();
+			if (ImGui_Button(bco_arg(no))) {
+				bco_var(result) = MODAL_PROMPT_RESULT_NO;
+				ImGui_CloseCurrentPopup();
+				bco_var(pending) = false;
+			}
+
+			ImGui_SameLine();
+			if (ImGui_Button(bco_arg(cancel))) {
+				bco_var(result) = MODAL_PROMPT_RESULT_CANCEL;
+				ImGui_CloseCurrentPopup();
+				bco_var(pending) = false;
+			}
+
+			ImGui_EndPopup();
+		} else {
+			bco_var(pending) = false;
+		}
+
+		if (bco_var(pending)) {
+			bco_at(WAIT_FOR_ANSWER) bco_yield();
+		}
+	} while (bco_var(pending));
+
+	bco_end
+
+	*bco_arg(result) = bco_var(result);
+}
+
+#define start_modal_action(FN, ...) \
+	do { \
+		if (bco_status(modal_action) == BCO_TERMINATED) { \
+			barena_init(&modal_arena, bgame_arena_pool); \
+			bco_spawn(modal_action, FN, __VA_ARGS__); \
+		} \
+	} while (0)
 
 // }}}
 
@@ -338,14 +397,7 @@ end:
 
 static void
 watch_module(const char* path, module_meta_t* module_meta) {
-	bresmon_init_watch(bresmon, &module_meta->watch, path, reload_module, module_meta);
-}
-
-static void
-reinit_watch(CK_MAP(module_meta_t*) module_map) {
-	for (int i = 0; i < map_size(module_map); ++i) {
-		bresmon_set_watch_callback(module_map[i]->watch, reload_module, module_map[i]);
-	}
+	bresmon_init_watch(bresmon, &module_meta->watch, path, BSFN(reload_module), module_meta);
 }
 
 #endif
@@ -404,16 +456,17 @@ static const ufa_filter_t image_file_filters[] = {
 
 bco_static(import_module) {
 	bco_vars(
-		barena_t arena;
 		ufa_open_file_t* open_file;
+	)
+	bco_yield_points(
+		WAIT_FOR_UFA
 	)
 
 	bco_begin
 	begin_native_modal();
 
-	barena_init(&bco_var(arena), bgame_arena_pool);
 	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
-		.arena = &bco_var(arena),
+		.arena = &modal_arena,
 		.memalign = barena_memalign,
 		.parent_window = cf_app_get_window(),
 		.filters = module_file_filters,
@@ -422,7 +475,7 @@ bco_static(import_module) {
 	});
 
 	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
-		bco_yield();
+		bco_at(WAIT_FOR_UFA) bco_yield();
 	}
 
 	ufa_status_t open_status = ufa_check_open_file(bco_var(open_file));
@@ -492,7 +545,6 @@ bco_static(import_module) {
 	bco_end
 
 	ufa_end_open_file(bco_var(open_file));
-	barena_reset(&bco_var(arena));
 	end_native_modal();
 }
 
@@ -647,16 +699,18 @@ apply_texture_bindings(grain_archetype_info_t* archetype_info) {
 
 bco_static(pick_texture, const char* binding_key) {
 	bco_vars(
-		barena_t arena;
 		ufa_open_file_t* open_file;
+	)
+
+	bco_yield_points(
+		WAIT_FOR_UFA
 	)
 
 	bco_begin
 	begin_native_modal();
 
-	barena_init(&bco_var(arena), bgame_arena_pool);
 	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
-		.arena = &bco_var(arena),
+		.arena = &modal_arena,
 		.memalign = barena_memalign,
 		.parent_window = cf_app_get_window(),
 		.filters = image_file_filters,
@@ -665,7 +719,7 @@ bco_static(pick_texture, const char* binding_key) {
 	});
 
 	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
-		bco_yield();
+		bco_at(WAIT_FOR_UFA) bco_yield();
 	}
 
 	ufa_status_t open_status = ufa_check_open_file(bco_var(open_file));
@@ -696,7 +750,6 @@ bco_static(pick_texture, const char* binding_key) {
 	bco_end
 
 	ufa_end_open_file(bco_var(open_file));
-	barena_reset(&bco_var(arena));
 	end_native_modal();
 }
 
@@ -1013,36 +1066,27 @@ save_texture_path(
 	return meta != NULL ? meta->path : NULL;
 }
 
-// Waits until the user picks a choice in the "Unsaved changes" modal.
-// The choice is left in save_prompt_result.
-bco_static(prompt_unsaved_changes) {
-	bco_begin
-
-	save_prompt_result = SAVE_PROMPT_PENDING;
-	should_prompt_unsaved = true;
-	while (save_prompt_result == SAVE_PROMPT_PENDING) {
-		bco_yield();
-	}
-
-	bco_end
-}
-
 // Save to current_file_ref without a dialog when one is held ("Save"), or
 // always through a dialog when force_dialog is set ("Save as").
 // Success is left in save_flow_succeeded for chained flows.
-bco_static(do_save_system, bool force_dialog) {
+bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
 	bco_vars(
-		barena_t arena;
 		ufa_save_file_t* save_file;
+	)
+	bco_yield_points(
+		WAIT_FOR_UFA
 	)
 
 	bco_begin
-	save_flow_succeeded = false;
+
+	if (bco_arg(save_succeeded) != NULL) {
+		*bco_arg(save_succeeded) = false;
+	}
+
 	begin_native_modal();
 
-	barena_init(&bco_var(arena), bgame_arena_pool);
 	bco_var(save_file) = ufa_begin_save_file((ufa_config_t){
-		.arena = &bco_var(arena),
+		.arena = &modal_arena,
 		.memalign = barena_memalign,
 		.parent_window = cf_app_get_window(),
 		.filters = system_file_filters,
@@ -1053,7 +1097,7 @@ bco_static(do_save_system, bool force_dialog) {
 	});
 
 	while (ufa_check_save_file(bco_var(save_file)) == UFA_PENDING) {
-		bco_yield();
+		bco_at(WAIT_FOR_UFA) bco_yield();
 	}
 
 	ufa_status_t save_status = ufa_check_save_file(bco_var(save_file));
@@ -1111,7 +1155,11 @@ bco_static(do_save_system, bool force_dialog) {
 		}
 
 		unsaved_changes = false;
-		save_flow_succeeded = true;
+
+		if (bco_arg(save_succeeded) != NULL) {
+			*bco_arg(save_succeeded) = true;
+		}
+
 		remember_directory(&last_system_path, file_path);
 		BLOG_INFO("Saved system to %s", file_path);
 	}
@@ -1119,8 +1167,45 @@ bco_static(do_save_system, bool force_dialog) {
 	bco_end
 
 	ufa_end_save_file(bco_var(save_file));
-	barena_reset(&bco_var(arena));
 	end_native_modal();
+}
+
+bco_static(maybe_save_changes, bool* should_continue) {
+	bco_vars(
+		modal_prompt_result_t prompt_result;
+	)
+
+	bco_yield_points(WAIT_FOR_PROMPT, WAIT_FOR_SAVE)
+
+	bco_begin
+
+	*bco_arg(should_continue) = true;
+	if (unsaved_changes) {
+		bco_at(WAIT_FOR_PROMPT) bco_call(modal_prompt,
+			.title = "Unsaved changes",
+			.question = bgame_arena_fmt(&modal_arena, "Save changes to %s?", system_name.data),
+			.yes = "Save",
+			.no = "Don't save",
+			.cancel = "Cancel",
+			.result = &bco_var(prompt_result),
+		);
+
+		if (bco_var(prompt_result) == MODAL_PROMPT_RESULT_YES) {
+			// If yes, continue if save succeeded
+			bco_at(WAIT_FOR_SAVE) bco_call(do_save_system,
+				.force_dialog = false,
+				.save_succeeded = bco_arg(should_continue),
+			);
+		} else if (bco_var(prompt_result) == MODAL_PROMPT_RESULT_NO) {
+			// If no, continue
+			*bco_arg(should_continue) = true;
+		} else {
+			// If cancelled, do not continue
+			*bco_arg(should_continue) = false;
+		}
+	}
+
+	bco_end
 }
 
 static void
@@ -1182,16 +1267,18 @@ reset_editor_system(void) {
 }
 
 bco_static(new_system) {
+	bco_vars(
+		bool should_continue;
+	)
+
+	bco_yield_points(
+		WAIT_FOR_SAVE
+	)
+
 	bco_begin
 
-	if (unsaved_changes) {
-		bco_call(prompt_unsaved_changes);
-		if (save_prompt_result == SAVE_PROMPT_CANCEL) { bco_return(); }
-		if (save_prompt_result == SAVE_PROMPT_SAVE) {
-			bco_call(do_save_system, false);
-			if (!save_flow_succeeded) { bco_return(); }
-		}
-	}
+	bco_at(WAIT_FOR_SAVE) bco_call(maybe_save_changes, &bco_var(should_continue));
+	if (!bco_var(should_continue)) { bco_return(); }
 
 	reset_editor_system();
 
@@ -1344,28 +1431,23 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 
 bco_static(open_system) {
 	bco_vars(
-		barena_t arena;
 		ufa_open_file_t* open_file;
-		bool dialog_started;
+		bool start_process;
+	)
+	bco_yield_points(
+		WAIT_FOR_SAVE,
+		WAIT_FOR_UFA
 	)
 
 	bco_begin
 
-	if (unsaved_changes) {
-		bco_call(prompt_unsaved_changes);
-		if (save_prompt_result == SAVE_PROMPT_CANCEL) { bco_return(); }
-		if (save_prompt_result == SAVE_PROMPT_SAVE) {
-			bco_call(do_save_system, false);
-			if (!save_flow_succeeded) { bco_return(); }
-		}
-	}
+	bco_at(WAIT_FOR_SAVE) bco_call(maybe_save_changes, &bco_var(start_process));
+	if (!bco_var(start_process)) { bco_return(); }
 
-	bco_var(dialog_started) = true;
 	begin_native_modal();
 
-	barena_init(&bco_var(arena), bgame_arena_pool);
 	bco_var(open_file) = ufa_begin_open_file((ufa_config_t){
-		.arena = &bco_var(arena),
+		.arena = &modal_arena,
 		.memalign = barena_memalign,
 		.parent_window = cf_app_get_window(),
 		.filters = system_file_filters,
@@ -1374,7 +1456,7 @@ bco_static(open_system) {
 	});
 
 	while (ufa_check_open_file(bco_var(open_file)) == UFA_PENDING) {
-		bco_yield();
+		bco_at(WAIT_FOR_UFA) bco_yield();
 	}
 
 	ufa_status_t open_status = ufa_check_open_file(bco_var(open_file));
@@ -1421,9 +1503,8 @@ bco_static(open_system) {
 	bco_end
 
 	// The unsaved-changes guard can return before any resource is acquired
-	if (bco_var(dialog_started)) {
+	if (bco_var(start_process)) {
 		ufa_end_open_file(bco_var(open_file));
-		barena_reset(&bco_var(arena));
 		end_native_modal();
 	}
 }
@@ -1487,14 +1568,21 @@ cleanup_module_map(CK_MAP(module_meta_t*)* module_map) {
 }
 
 static void
+check_reload(void) {
+	if (!bco_reloadable(modal_action)) {
+		bgame_veto_reload();
+	}
+}
+
+static void
+before_reload(void) {
+	bco_reload_begin(modal_action);
+}
+
+static void
 after_reload(void) {
 	hook_log_sink();
-
-#ifndef __EMSCRIPTEN__
-	reinit_watch(emitters);
-	reinit_watch(affectors);
-	reinit_watch(renderers);
-#endif
+	bco_reload_end(modal_action);
 }
 
 static void
@@ -1504,6 +1592,8 @@ init(void) {
 	hook_log_sink();
 
 	if (bgame_current_scene_state() == BGAME_SCENE_INITIALIZING) {
+		modal_action = bgame_zalloc(bco_mem_size(2048), scene_allocator);
+
 		show_emitters = true;
 		show_affectors = true;
 		show_renderer = true;
@@ -1576,6 +1666,8 @@ static void
 cleanup(void) {
 	save_prefs();
 	log_sink_active = false;
+
+	bgame_free(modal_action, scene_allocator);
 
 	grain_destroy_pool(pool);
 
@@ -1729,10 +1821,10 @@ update(void) {
 			start_modal_action(open_system);
 			break;
 		case CMD_SAVE:
-			start_modal_action(do_save_system, false);
+			start_modal_action(do_save_system, .force_dialog = false);
 			break;
 		case CMD_SAVE_AS:
-			start_modal_action(do_save_system, true);
+			start_modal_action(do_save_system, .force_dialog = true);
 			break;
 		case CMD_NONE:
 			break;
@@ -1977,7 +2069,9 @@ update(void) {
 
 // Modal {{{
 	if (bco_status(modal_action) != BCO_TERMINATED) {
-		bco_resume(modal_action);
+		if (bco_resume(modal_action) == BCO_TERMINATED) {
+			barena_reset(&modal_arena);
+		}
 	}
 
 	if (should_begin_native_modal) {
@@ -2052,44 +2146,6 @@ update(void) {
 
 		ImGui_EndPopup();
 	}
-
-	if (should_prompt_unsaved) {
-		ImGui_OpenPopup("Unsaved changes", 0);
-		should_prompt_unsaved = false;
-		unsaved_prompt_active = true;
-	}
-
-	if (ImGui_BeginPopupModal(
-			"Unsaved changes",
-			NULL,
-			ImGuiWindowFlags_AlwaysAutoResize
-	)) {
-		ImGui_Text("Save changes to %s?", system_name.data);
-
-		if (ImGui_Button("Save")) {
-			save_prompt_result = SAVE_PROMPT_SAVE;
-			unsaved_prompt_active = false;
-			ImGui_CloseCurrentPopup();
-		}
-		ImGui_SameLine();
-		if (ImGui_Button("Don't save")) {
-			save_prompt_result = SAVE_PROMPT_DONT_SAVE;
-			unsaved_prompt_active = false;
-			ImGui_CloseCurrentPopup();
-		}
-		ImGui_SameLine();
-		if (ImGui_Button("Cancel")) {
-			save_prompt_result = SAVE_PROMPT_CANCEL;
-			unsaved_prompt_active = false;
-			ImGui_CloseCurrentPopup();
-		}
-
-		ImGui_EndPopup();
-	} else if (unsaved_prompt_active) {
-		// Dismissed without a choice (e.g. Escape)
-		save_prompt_result = SAVE_PROMPT_CANCEL;
-		unsaved_prompt_active = false;
-	}
 // }}}
 
 #ifndef __EMSCRIPTEN__
@@ -2144,7 +2200,9 @@ SCENE {
 	.update = update,
 	.cleanup = cleanup,
 
+	.check_reload = check_reload,
 	.after_reload = after_reload,
+	.before_reload = before_reload,
 };
 
 #ifndef __EMSCRIPTEN__
