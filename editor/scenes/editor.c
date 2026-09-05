@@ -253,10 +253,6 @@ bco_static(
 	const char* cancel,
 	modal_prompt_result_t* result
 ) {
-	bco_vars(
-		modal_prompt_result_t result;
-		bool pending;
-	)
 	bco_yield_points(
 		WAIT_FOR_ANSWER
 	)
@@ -270,51 +266,39 @@ bco_static(
 	bco_arg(no) = bgame_arena_strcpy(&modal_arena, bco_arg(no));
 	bco_arg(cancel) = bgame_arena_strcpy(&modal_arena, bco_arg(cancel));
 
-	bco_var(result) = MODAL_PROMPT_RESULT_CANCEL;
-	bco_var(pending) = true;
+	*bco_arg(result) = MODAL_PROMPT_RESULT_CANCEL;
 	ImGui_OpenPopup(bco_arg(title), 0);
 
-	do {
-		if (ImGui_BeginPopupModal(
-			bco_arg(title),
-			NULL,
-			ImGuiWindowFlags_AlwaysAutoResize
-		)) {
-			ImGui_Text("%s", bco_arg(question));
+	while (ImGui_BeginPopupModal(
+		bco_arg(title),
+		NULL,
+		ImGuiWindowFlags_AlwaysAutoResize
+	)) {
+		ImGui_Text("%s", bco_arg(question));
 
-			if (ImGui_Button(bco_arg(yes))) {
-				bco_var(result) = MODAL_PROMPT_RESULT_YES;
-				ImGui_CloseCurrentPopup();
-				bco_var(pending) = false;
-			}
-
-			ImGui_SameLine();
-			if (ImGui_Button(bco_arg(no))) {
-				bco_var(result) = MODAL_PROMPT_RESULT_NO;
-				ImGui_CloseCurrentPopup();
-				bco_var(pending) = false;
-			}
-
-			ImGui_SameLine();
-			if (ImGui_Button(bco_arg(cancel))) {
-				bco_var(result) = MODAL_PROMPT_RESULT_CANCEL;
-				ImGui_CloseCurrentPopup();
-				bco_var(pending) = false;
-			}
-
-			ImGui_EndPopup();
-		} else {
-			bco_var(pending) = false;
+		if (ImGui_Button(bco_arg(yes))) {
+			*bco_arg(result) = MODAL_PROMPT_RESULT_YES;
+			ImGui_CloseCurrentPopup();
 		}
 
-		if (bco_var(pending)) {
-			bco_at(WAIT_FOR_ANSWER) bco_yield();
+		ImGui_SameLine();
+		if (ImGui_Button(bco_arg(no))) {
+			*bco_arg(result) = MODAL_PROMPT_RESULT_NO;
+			ImGui_CloseCurrentPopup();
 		}
-	} while (bco_var(pending));
+
+		ImGui_SameLine();
+		if (ImGui_Button(bco_arg(cancel))) {
+			*bco_arg(result) = MODAL_PROMPT_RESULT_CANCEL;
+			ImGui_CloseCurrentPopup();
+		}
+
+		ImGui_EndPopup();
+
+		bco_at(WAIT_FOR_ANSWER) bco_yield();
+	}
 
 	bco_end
-
-	*bco_arg(result) = bco_var(result);
 }
 
 bco_static(show_about) {
