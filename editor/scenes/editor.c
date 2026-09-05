@@ -19,6 +19,7 @@
 #include <math.h>
 #include <stdio.h>
 #include "../pref.h"
+#include "../resources.rc"
 
 #ifndef __EMSCRIPTEN__
 #	define BRESMON_API static
@@ -123,7 +124,6 @@ SCENE_VAR(char*, last_texture_path)
 // Modal {{{
 
 SCENE_VAR(char*, popup_error)
-SCENE_VAR(char*, attributions_text)
 SCENE_VAR(bco_t*, modal_action)
 SCENE_VAR(barena_t, modal_arena)
 
@@ -135,9 +135,7 @@ typedef enum {
 
 static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
-
 static bool should_popup_error = false;
-static bool should_popup_about = false;
 
 // Menu items and shortcut keys funnel into one of these each frame
 typedef enum {
@@ -220,6 +218,14 @@ log_level_color(blog_level_t level) {
 // }}}
 
 // Modal {{{
+
+#define start_modal_action(FN, ...) \
+	do { \
+		if (bco_status(modal_action) == BCO_TERMINATED) { \
+			barena_init(&modal_arena, bgame_arena_pool); \
+			bco_spawn(modal_action, FN, __VA_ARGS__); \
+		} \
+	} while (0)
 
 static void
 begin_native_modal(void) {
@@ -311,13 +317,33 @@ bco_static(
 	*bco_arg(result) = bco_var(result);
 }
 
-#define start_modal_action(FN, ...) \
-	do { \
-		if (bco_status(modal_action) == BCO_TERMINATED) { \
-			barena_init(&modal_arena, bgame_arena_pool); \
-			bco_spawn(modal_action, FN, __VA_ARGS__); \
-		} \
-	} while (0)
+bco_static(show_about) {
+	bco_yield_points(BCO_WAIT_POPUP);
+
+	bco_begin
+
+	ImGui_OpenPopup("About", 0);
+
+	while (ImGui_BeginPopupModal(
+		"About",
+		NULL,
+		ImGuiWindowFlags_AlwaysAutoResize
+	)) {
+		ImGui_TextUnformatted("grain-editor");
+		ImGui_SeparatorText("Attributions");
+		ImGui_TextUnformatted((const char*)XINCBIN_GET(attributions_md).data);
+
+		if (ImGui_Button("OK")) {
+			ImGui_CloseCurrentPopup();
+		}
+
+		ImGui_EndPopup();
+
+		bco_at(BCO_WAIT_POPUP) bco_yield();
+	}
+
+	bco_end
+}
 
 // }}}
 
@@ -1688,7 +1714,6 @@ cleanup(void) {
 	clear_texture_bindings();
 	sfree(tmp_source_buf);
 	sfree(popup_error);
-	sfree(attributions_text);
 	sfree(last_module_path);
 	sfree(last_system_path);
 	sfree(last_texture_path);
@@ -1788,7 +1813,7 @@ update(void) {
 
 		if (ImGui_BeginMenu("Help")) {
 			if (ImGui_MenuItem("About")) {
-				should_popup_about = true;
+				start_modal_action(show_about);
 			}
 
 			ImGui_EndMenu();
@@ -2113,39 +2138,6 @@ update(void) {
 
 		ImGui_EndPopup();
 	}
-
-	if (should_popup_about) {
-		if (attributions_text == NULL) {
-			char* content = cf_fs_read_entire_file_to_memory_and_nul_terminate(
-				"/assets/ATTRIBUTIONS.md", NULL
-			);
-			if (content != NULL) {
-				sset(attributions_text, content);
-				cf_free(content);
-			} else {
-				sset(attributions_text, "Could not load /assets/ATTRIBUTIONS.md");
-			}
-		}
-
-		ImGui_OpenPopup("About", 0);
-		should_popup_about = false;
-	}
-
-	if (ImGui_BeginPopupModal(
-			"About",
-			NULL,
-			ImGuiWindowFlags_AlwaysAutoResize
-	)) {
-		ImGui_TextUnformatted("grain-editor");
-		ImGui_SeparatorText("Attributions");
-		ImGui_TextUnformatted(attributions_text);
-
-		if (ImGui_Button("OK")) {
-			ImGui_CloseCurrentPopup();
-		}
-
-		ImGui_EndPopup();
-	}
 // }}}
 
 #ifndef __EMSCRIPTEN__
@@ -2210,3 +2202,6 @@ SCENE {
 #	define BRESMON_REALLOC bgame_realloc
 #	include <bresmon.h>
 #endif
+
+#define XINCBIN_IMPLEMENTATION
+#include "../resources.rc"

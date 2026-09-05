@@ -1,0 +1,3 @@
+#include <xincbin.h>
+
+XINCBIN(attributions_md, PROJECT_DIR "ATTRIBUTIONS.md")
