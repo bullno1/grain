@@ -135,6 +135,7 @@ SCENE_VAR(char*, attributions_text)
 
 static _Alignas(bco_align_t) char modal_action_storage[2048];
 static bco_t* modal_action = (bco_t*)modal_action_storage;
+static bgame_reload_block_t modal_block = { 0 };
 
 static bool should_begin_native_modal = false;
 static bool should_end_native_modal = true;
@@ -243,12 +244,12 @@ begin_native_modal(void) {
 	should_begin_native_modal = true;
 	should_end_native_modal = false;
 
-	bgame_block_reload();
+	modal_block = bgame_block_reload();
 }
 
 static void
 end_native_modal(void) {
-	bgame_unblock_reload();
+	bgame_unblock_reload(modal_block);
 
 	should_end_native_modal = true;
 }
