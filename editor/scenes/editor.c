@@ -407,7 +407,7 @@ end:
 
 static void
 watch_module(const char* path, module_meta_t* module_meta) {
-	bresmon_init_watch(bresmon, &module_meta->watch, path, BSFN(reload_module), module_meta);
+	module_meta->watch = bresmon_watch(bresmon, path, BSFN(reload_module), module_meta);
 }
 
 #endif
