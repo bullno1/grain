@@ -1579,8 +1579,9 @@ cleanup_module_map(CK_MAP(module_meta_t*)* module_map) {
 
 static void
 check_reload(void) {
-	if (!bco_reloadable(modal_action)) {
-		bgame_veto_reload();
+	bco_loc_t blocker;
+	if (!bco_reloadable(modal_action, &blocker)) {
+		bgame_veto_reload_at(blocker.file, blocker.line);
 	}
 }
 
