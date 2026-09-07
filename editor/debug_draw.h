@@ -12,8 +12,11 @@
  * An anchor (`at`) may name a vec2 or a vec3 param; a vec2 sits on the XY
  * plane at z = 0, which is how the 3D view shows 2D gizmos.
  *
- * @position            (vec2/vec3) crosshair + handle; a vec2 is draggable
- *                                  in the 2D view, writes back
+ * @position            (vec2/vec3) crosshair + handle, writes back. In the
+ *                                  3D view a vec3 also gets translate stems:
+ *                                  the center handle drags on the
+ *                                  camera-facing plane, a stem along its
+ *                                  axis; a vec2 drags on the XY plane
  * @radius(at)          (float) circle around the anchor; a sphere in 3D
  * @angle(at, length)   (float) arrow ray from the anchor, angle in radians,
  *                              in the XY plane
@@ -27,14 +30,21 @@
  * @extent(at)          (vec2/vec3) rectangle or box of that size centered
  *                                  on the anchor
  * @direction(at, length)
- *                      (vec3)  arrow of the normalized value, `length` long
+ *                      (vec3)  arrow of the normalized value, `length` long;
+ *                              its tip handle drags on the sphere of that
+ *                              radius and writes back, keeping the magnitude
  * @cone(at, axis, inner, outer)
  *                      (float) cone of this half-angle around the vec3 param
  *                              `axis` names; inner/outer radii make it a
- *                              spherical sector, the 3D form of @arc
+ *                              spherical sector, the 3D form of @arc. The
+ *                              ring handle on the silhouette drags the
+ *                              half-angle and writes back
  *
  * In the 3D view, arrows cast a dashed shadow on the y = 0 ground plane with
- * a drop line from the tip, the depth cue a single viewpoint lacks.
+ * a drop line from the tip, the depth cue a single viewpoint lacks. Every 3D
+ * drag is one or two degrees of freedom on a plane or sphere fixed at grab,
+ * so a drag never has to guess depth. Picking needs the draw3d camera stacks
+ * pushed before debug_draw_param runs.
  */
 
 /**

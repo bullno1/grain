@@ -1836,8 +1836,9 @@ update_camera(void) {
 	}
 }
 
-// grain_end_render and the gizmos read the draw3d stacks; keep them pushed
-// until the frame is presented, since draw commands are flushed then
+// Gizmo picking, grain_end_render and gizmo drawing all read the draw3d
+// stacks: pushed before the UI pass, kept until the frame is presented since
+// draw commands are only flushed then
 static void
 push_camera(void) {
 	float aspect = (float)cf_app_get_canvas_width() / (float)cf_app_get_canvas_height();
@@ -1918,6 +1919,15 @@ update(void) {
 	ImGui_DockSpaceOverViewportEx(dockspace, NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
 
 	debug_draw_begin((grain_view_t)view_mode);
+
+	// The camera goes up before the UI pass: gizmo picking unprojects the
+	// mouse through it. Captured once so the pop matches even when the View
+	// combo flips the mode mid-frame.
+	bool is_3d = view_mode == GRAIN_VIEW_3D;
+	if (is_3d) {
+		update_camera();
+		push_camera();
+	}
 
 // Menu bar {{{
 	if (ImGui_BeginMainMenuBar()) {
@@ -2347,10 +2357,7 @@ update(void) {
 		}
 	}
 
-	bool is_3d = view_mode == GRAIN_VIEW_3D;
 	if (is_3d) {
-		update_camera();
-		push_camera();
 		draw_grid();
 		// Flush the grid now so the particles draw over it
 		cf_render_to(cf_app_get_canvas(), false);

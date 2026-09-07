@@ -1,6 +1,7 @@
 #include "debug_draw.h"
 #include <cute.h>
 #include <dcimgui.h>
+#include <float.h>
 #include <math.h>
 #include <string.h>
 
@@ -9,12 +10,14 @@
 #define ARC_SEGMENT_ANGLE 0.0872665f  // 5 degrees
 #define MAX_ARC_SEGMENTS 64
 
-static const float HANDLE_RADIUS = 8.f;
+static const float HANDLE_RADIUS = 8.f;     // px
 static const float CROSSHAIR_SIZE = 12.f;
 static const float ARROW_WIDTH = 6.f;
 static const float DEFAULT_LENGTH = 64.f;
 static const float GIZMO_THICKNESS = 1.f;
 static const float SHADOW_DASH = 6.f;
+static const float STEM_PIXELS = 48.f;      // on-screen length of a translate stem
+static const float STEM_HIT_PIXELS = 6.f;
 
 typedef enum {
 	GIZMO_POSITION,
@@ -48,12 +51,44 @@ typedef struct {
 	int num_refs;
 } gizmo_t;
 
+// An in-progress drag. Interaction runs during the UI pass (see
+// debug_draw_param) so a write lands in the same frame's grain_end_update;
+// the state carries what the grab decided over to the following frames.
+typedef enum {
+	DRAG_NONE,
+	DRAG_POSITION_2D,     // 2D view: the mouse maps straight to the plane
+	DRAG_POSITION_PLANE,  // 3D view: along a plane; camera-facing, or XY for a vec2
+	DRAG_POSITION_STEM,   // 3D view: along one world axis
+	DRAG_DIRECTION,       // 3D view: tip on a sphere around the anchor
+	DRAG_CONE,            // 3D view: ring handle in the plane of the silhouette
+} drag_kind_t;
+
+typedef struct {
+	drag_kind_t kind;
+	int param_index;
+	// POSITION_2D: value minus mouse at grab
+	CF_V2 offset_2d;
+	// The plane the mouse ray meets each frame (PLANE, STEM, CONE)
+	CF_Plane3 plane;
+	// POSITION_PLANE: value minus hit at grab
+	CF_V3 offset;
+	// POSITION_STEM: the stem's axis, and the value and hit-along-axis at grab
+	// CONE: the cone's axis
+	CF_V3 axis;
+	CF_V3 value_at_grab;
+	float t_at_grab;
+	// DIRECTION, CONE: the anchor; DIRECTION: sphere radius and the value's
+	// magnitude, kept across the drag
+	CF_V3 anchor;
+	float radius;
+	float magnitude;
+} drag_t;
+
 // Per-frame lists and transient drag state; safe to reset on live reload
 static gizmo_t gizmos[MAX_GIZMOS];
 static int num_gizmos = 0;
 static int hot_param = -1;
-static int drag_param = -1;
-static CF_V2 drag_offset;
+static drag_t drag;
 static grain_view_t current_view = GRAIN_VIEW_2D;
 
 typedef struct {
@@ -202,35 +237,217 @@ drop_gizmo(gizmo_t* gizmo) {
 	if (gizmo == &gizmos[num_gizmos - 1]) { --num_gizmos; }
 }
 
+// Picking {{{
+//
+// Everything here assumes the draw3d camera stacks are pushed for the frame.
+// Handles are hit-tested in the 2D draw space, where the identity camera
+// makes a unit a pixel, so radii are pixel sizes at any depth.
+
+static CF_V2
+mouse_2d(void) {
+	return cf_screen_to_world((CF_V2){ cf_mouse_x(), cf_mouse_y() });
+}
+
+static CF_Ray3
+mouse_ray(void) {
+	CF_Ray3 ray;
+	cf_draw3d_unproject(mouse_2d(), &ray.p, &ray.d);
+	ray.t = FLT_MAX;
+	return ray;
+}
+
+static bool
+ray_to_plane(CF_Ray3 ray, CF_Plane3 plane, CF_V3* hit) {
+	CF_Raycast3 cast = cf_ray3_to_plane3(ray, plane);
+	if (!cast.hit) { return false; }
+	*hit = cf_add_v3(ray.p, cf_mul_v3_f(ray.d, cast.t));
+	return true;
+}
+
+//! The camera's axes in world space, read off the view matrix's rows
+static void
+camera_basis(CF_V3* right, CF_V3* up, CF_V3* forward) {
+	CF_M4x4 view = cf_draw3d_peek_view();
+	const float* e = view.elements;  // column-major: (row, col) at e[col * 4 + row]
+	*right   = cf_v3(e[0], e[4], e[8]);
+	*up      = cf_v3(e[1], e[5], e[9]);
+	*forward = cf_v3(-e[2], -e[6], -e[10]);
+}
+
+//! The plane through a point that faces the camera
+static CF_Plane3
+facing_plane(CF_V3 through) {
+	CF_V3 right, up, forward;
+	camera_basis(&right, &up, &forward);
+	return cf_plane3_at(forward, through);
+}
+
+//! World units per pixel at a point's depth, measured along the camera's
+//! right axis; 0 when the point is behind the camera
+static float
+world_per_pixel(CF_V3 at) {
+	CF_V3 right, up, forward;
+	camera_basis(&right, &up, &forward);
+	CF_V3 a = cf_draw3d_project(at);
+	CF_V3 b = cf_draw3d_project(cf_add_v3(at, right));
+	if (a.z < 0.f || b.z < 0.f) { return 0.f; }
+	float px = hypotf(b.x - a.x, b.y - a.y);
+	return px > 1e-6f ? 1.f / px : 0.f;
+}
+
+static float
+stem_length(CF_V3 at) {
+	return STEM_PIXELS * world_per_pixel(at);
+}
+
+static bool
+near_point(CF_V2 mouse, CF_V3 world, float radius_px) {
+	CF_V3 p = cf_draw3d_project(world);
+	if (p.z < 0.f) { return false; }
+	float dx = mouse.x - p.x;
+	float dy = mouse.y - p.y;
+	return dx * dx + dy * dy <= radius_px * radius_px;
+}
+
+static bool
+near_segment(CF_V2 mouse, CF_V3 world_a, CF_V3 world_b, float distance_px) {
+	CF_V3 a = cf_draw3d_project(world_a);
+	CF_V3 b = cf_draw3d_project(world_b);
+	if (a.z < 0.f || b.z < 0.f) { return false; }
+	CF_V2 ab = { b.x - a.x, b.y - a.y };
+	CF_V2 am = { mouse.x - a.x, mouse.y - a.y };
+	float len2 = ab.x * ab.x + ab.y * ab.y;
+	float t = len2 > 0.f ? (am.x * ab.x + am.y * ab.y) / len2 : 0.f;
+	if (t < 0.f) { t = 0.f; }
+	if (t > 1.f) { t = 1.f; }
+	float dx = am.x - ab.x * t;
+	float dy = am.y - ab.y * t;
+	return dx * dx + dy * dy <= distance_px * distance_px;
+}
+
+//! Rim direction of a cone's ring handle: where the plane of the axis and
+//! the camera's right vector cuts the cap, which is always on the silhouette
+static CF_V3
+cone_handle_rim(CF_V3 axis) {
+	CF_V3 right, up, forward;
+	camera_basis(&right, &up, &forward);
+	CF_V3 rim = cf_safe_norm_v3(cf_sub_v3(right, cf_mul_v3_f(axis, cf_dot_v3(axis, right))));
+	if (cf_dot_v3(rim, rim) == 0.f) {
+		// Axis along the camera's right: use its up instead
+		rim = cf_safe_norm_v3(cf_sub_v3(up, cf_mul_v3_f(axis, cf_dot_v3(axis, up))));
+	}
+	return rim;
+}
+
+static CF_V3
+cone_handle_point(CF_V3 at, CF_V3 axis, float half_angle, float outer) {
+	CF_V3 rim = cone_handle_rim(axis);
+	CF_V3 dir = cf_add_v3(cf_mul_v3_f(rim, sinf(half_angle)), cf_mul_v3_f(axis, cosf(half_angle)));
+	return cf_add_v3(at, cf_mul_v3_f(dir, outer));
+}
+
+//! A left press over the viewport with no drag in flight
+static bool
+can_grab(void) {
+	return drag.kind == DRAG_NONE
+		&& cf_mouse_just_pressed(CF_MOUSE_BUTTON_LEFT)
+		&& !ImGui_GetIO()->WantCaptureMouse;
+}
+
+static bool
+dragging(drag_kind_t kind, int param_index) {
+	return drag.kind == kind && drag.param_index == param_index;
+}
+
+// }}}
+
 static void
 register_position(const resolve_ctx_t* ctx, const grain_param_info_t* param, int param_index) {
 	bool is_vec3 = param->type == CF_SHADER_INFO_TYPE_FLOAT3;
 	if (!is_vec3 && param->type != CF_SHADER_INFO_TYPE_FLOAT2) { return; }
 	float* value = grain_get_parameter(ctx->system, param_index);
 	if (value == NULL) { return; }
+	CF_V3 pos = cf_v3(value[0], value[1], is_vec3 ? value[2] : 0.f);
 
-	// Interaction happens here, during the UI pass, so the write is uploaded
-	// by this frame's grain_end_update. Only the 2D view drags: the mouse
-	// maps to a plane there, while a 3D handle has no such plane yet.
-	if (current_view == GRAIN_VIEW_2D && !is_vec3) {
-		CF_V2 mouse = cf_screen_to_world((CF_V2){ cf_mouse_x(), cf_mouse_y() });
-		if (drag_param == param_index) {
-			if (cf_mouse_down(CF_MOUSE_BUTTON_LEFT)) {
-				value[0] = mouse.x + drag_offset.x;
-				value[1] = mouse.y + drag_offset.y;
+	if (current_view == GRAIN_VIEW_2D) {
+		if (!is_vec3) {
+			CF_V2 mouse = mouse_2d();
+			if (dragging(DRAG_POSITION_2D, param_index)) {
+				value[0] = mouse.x + drag.offset_2d.x;
+				value[1] = mouse.y + drag.offset_2d.y;
 				grain_parameter_modified(ctx->system, param_index);
-			} else {
-				drag_param = -1;
+			} else if (can_grab()) {
+				CF_V2 delta = { value[0] - mouse.x, value[1] - mouse.y };
+				if (delta.x * delta.x + delta.y * delta.y <= HANDLE_RADIUS * HANDLE_RADIUS) {
+					drag = (drag_t){
+						.kind = DRAG_POSITION_2D,
+						.param_index = param_index,
+						.offset_2d = delta,
+					};
+				}
 			}
-		} else if (
-			drag_param < 0
-			&& cf_mouse_just_pressed(CF_MOUSE_BUTTON_LEFT)
-			&& !ImGui_GetIO()->WantCaptureMouse
-		) {
-			CF_V2 delta = { value[0] - mouse.x, value[1] - mouse.y };
-			if (delta.x * delta.x + delta.y * delta.y <= HANDLE_RADIUS * HANDLE_RADIUS) {
-				drag_param = param_index;
-				drag_offset = delta;
+		}
+	} else if (dragging(DRAG_POSITION_PLANE, param_index) || dragging(DRAG_POSITION_STEM, param_index)) {
+		CF_V3 hit;
+		if (ray_to_plane(mouse_ray(), drag.plane, &hit)) {
+			CF_V3 new_pos;
+			if (drag.kind == DRAG_POSITION_PLANE) {
+				new_pos = cf_add_v3(hit, drag.offset);
+			} else {
+				float t = cf_dot_v3(hit, drag.axis) - drag.t_at_grab;
+				new_pos = cf_add_v3(drag.value_at_grab, cf_mul_v3_f(drag.axis, t));
+			}
+			value[0] = new_pos.x;
+			value[1] = new_pos.y;
+			if (is_vec3) { value[2] = new_pos.z; }
+			grain_parameter_modified(ctx->system, param_index);
+		}
+	} else if (can_grab()) {
+		CF_V2 mouse = mouse_2d();
+		CF_Ray3 ray = mouse_ray();
+		CF_V3 hit;
+		if (near_point(mouse, pos, HANDLE_RADIUS)) {
+			// Center handle: free drag on the camera-facing plane; a vec2 has
+			// no depth to give, so it stays on its XY plane
+			CF_Plane3 plane = is_vec3
+				? facing_plane(pos)
+				: cf_plane3_at(cf_v3(0.f, 0.f, 1.f), pos);
+			if (ray_to_plane(ray, plane, &hit)) {
+				drag = (drag_t){
+					.kind = DRAG_POSITION_PLANE,
+					.param_index = param_index,
+					.plane = plane,
+					.offset = cf_sub_v3(pos, hit),
+				};
+			}
+		} else if (is_vec3) {
+			// Translate stems: one degree of freedom each, along a plane that
+			// holds the stem and faces the camera as squarely as it can
+			CF_V3 right, up, forward;
+			camera_basis(&right, &up, &forward);
+			float length = stem_length(pos);
+			const CF_V3 axes[] = {
+				cf_v3(1.f, 0.f, 0.f), cf_v3(0.f, 1.f, 0.f), cf_v3(0.f, 0.f, 1.f),
+			};
+			for (int i = 0; i < 3; ++i) {
+				CF_V3 axis = axes[i];
+				CF_V3 tip = cf_add_v3(pos, cf_mul_v3_f(axis, length));
+				if (!near_segment(mouse, pos, tip, STEM_HIT_PIXELS)) { continue; }
+				CF_V3 normal = cf_safe_norm_v3(
+					cf_sub_v3(forward, cf_mul_v3_f(axis, cf_dot_v3(axis, forward)))
+				);
+				if (cf_dot_v3(normal, normal) == 0.f) { continue; }  // stem points at the camera
+				CF_Plane3 plane = cf_plane3_at(normal, pos);
+				if (!ray_to_plane(ray, plane, &hit)) { continue; }
+				drag = (drag_t){
+					.kind = DRAG_POSITION_STEM,
+					.param_index = param_index,
+					.plane = plane,
+					.axis = axis,
+					.value_at_grab = pos,
+					.t_at_grab = cf_dot_v3(hit, axis),
+				};
+				break;
 			}
 		}
 	}
@@ -396,7 +613,7 @@ register_direction(
 	int param_index
 ) {
 	if (param->type != CF_SHADER_INFO_TYPE_FLOAT3) { return; }
-	const float* value = grain_get_parameter(ctx->system, param_index);
+	float* value = grain_get_parameter(ctx->system, param_index);
 	if (value == NULL) { return; }
 
 	gizmo_t* gizmo = push_gizmo(GIZMO_DIRECTION, param_index);
@@ -411,6 +628,47 @@ register_direction(
 		drop_gizmo(gizmo);
 		return;
 	}
+
+	if (current_view == GRAIN_VIEW_3D) {
+		CF_V3 axis = cf_safe_norm_v3(cf_v3(value[0], value[1], value[2]));
+		if (dragging(DRAG_DIRECTION, param_index)) {
+			// The tip rides the sphere of the arrow's length. Past the
+			// silhouette the ray misses: slide on the camera-facing plane
+			// through the current tip instead and fall back onto the sphere.
+			CF_Ray3 ray = mouse_ray();
+			CF_V3 hit;
+			bool hit_found = false;
+			CF_Raycast3 cast = cf_ray3_to_sphere(ray, cf_make_sphere(drag.anchor, drag.radius));
+			if (cast.hit) {
+				hit = cf_add_v3(ray.p, cf_mul_v3_f(ray.d, cast.t));
+				hit_found = true;
+			} else {
+				CF_V3 tip = cf_add_v3(drag.anchor, cf_mul_v3_f(axis, drag.radius));
+				hit_found = ray_to_plane(ray, facing_plane(tip), &hit);
+			}
+			CF_V3 dir = hit_found ? cf_safe_norm_v3(cf_sub_v3(hit, drag.anchor)) : cf_v3(0.f, 0.f, 0.f);
+			if (cf_dot_v3(dir, dir) > 0.f) {
+				CF_V3 new_value = cf_mul_v3_f(dir, drag.magnitude);
+				value[0] = new_value.x;
+				value[1] = new_value.y;
+				value[2] = new_value.z;
+				grain_parameter_modified(ctx->system, param_index);
+			}
+		} else if (can_grab() && cf_dot_v3(axis, axis) > 0.f) {
+			CF_V3 tip = cf_add_v3(gizmo->at, cf_mul_v3_f(axis, length));
+			if (near_point(mouse_2d(), tip, HANDLE_RADIUS)) {
+				float magnitude = cf_len_v3(cf_v3(value[0], value[1], value[2]));
+				drag = (drag_t){
+					.kind = DRAG_DIRECTION,
+					.param_index = param_index,
+					.anchor = gizmo->at,
+					.radius = length,
+					.magnitude = magnitude > 0.f ? magnitude : 1.f,
+				};
+			}
+		}
+	}
+
 	gizmo->axis = cf_safe_norm_v3(cf_v3(value[0], value[1], value[2]));
 	gizmo->values[0] = length;
 }
@@ -423,7 +681,7 @@ register_cone(
 	int param_index
 ) {
 	if (param->type != CF_SHADER_INFO_TYPE_FLOAT) { return; }
-	const float* value = grain_get_parameter(ctx->system, param_index);
+	float* value = grain_get_parameter(ctx->system, param_index);
 	if (value == NULL) { return; }
 
 	gizmo_t* gizmo = push_gizmo(GIZMO_CONE, param_index);
@@ -446,6 +704,41 @@ register_cone(
 	// Same fallback as a module normalizing a zero axis would sensibly pick
 	gizmo->axis = cf_safe_norm_v3(axis);
 	if (cf_dot_v3(gizmo->axis, gizmo->axis) == 0.f) { gizmo->axis = cf_v3(0.f, 1.f, 0.f); }
+
+	if (current_view == GRAIN_VIEW_3D) {
+		if (dragging(DRAG_CONE, param_index)) {
+			// One degree of freedom: the angle the hit makes with the axis,
+			// measured in the plane fixed at grab
+			CF_V3 hit;
+			if (ray_to_plane(mouse_ray(), drag.plane, &hit)) {
+				CF_V3 dir = cf_safe_norm_v3(cf_sub_v3(hit, drag.anchor));
+				if (cf_dot_v3(dir, dir) > 0.f) {
+					float cos_angle = cf_dot_v3(dir, drag.axis);
+					if (cos_angle > 1.f) { cos_angle = 1.f; }
+					if (cos_angle < -1.f) { cos_angle = -1.f; }
+					*value = acosf(cos_angle);
+					grain_parameter_modified(ctx->system, param_index);
+				}
+			}
+		} else if (can_grab()) {
+			float outer_radius = outer > inner ? outer : inner;
+			CF_V3 handle = cone_handle_point(gizmo->at, gizmo->axis, *value, outer_radius);
+			if (near_point(mouse_2d(), handle, HANDLE_RADIUS)) {
+				CF_V3 rim = cone_handle_rim(gizmo->axis);
+				CF_V3 normal = cf_safe_norm_v3(cf_cross_v3(gizmo->axis, rim));
+				if (cf_dot_v3(normal, normal) > 0.f) {
+					drag = (drag_t){
+						.kind = DRAG_CONE,
+						.param_index = param_index,
+						.plane = cf_plane3_at(normal, gizmo->at),
+						.anchor = gizmo->at,
+						.axis = gizmo->axis,
+					};
+				}
+			}
+		}
+	}
+
 	gizmo->values[0] = *value;
 	gizmo->values[1] = inner;
 	gizmo->values[2] = outer;
@@ -455,8 +748,12 @@ void
 debug_draw_begin(grain_view_t view) {
 	num_gizmos = 0;
 	hot_param = -1;
+	// A drag ends on release, or when its param stops registering (a reload
+	// removed it) or the view changes under it
+	if (view != current_view || !cf_mouse_down(CF_MOUSE_BUTTON_LEFT)) {
+		drag.kind = DRAG_NONE;
+	}
 	current_view = view;
-	if (view != GRAIN_VIEW_2D) { drag_param = -1; }
 }
 
 void
@@ -684,6 +981,29 @@ draw3d_sector(CF_V3 at, float from, float to, float inner, float outer) {
 	cf_draw3d_polyline(points3d, num_points, GIZMO_THICKNESS, true);
 }
 
+//! Translate stems in the conventional axis colors, sized on screen
+static void
+draw3d_stems(CF_V3 at) {
+	float length = stem_length(at);
+	if (length <= 0.f) { return; }
+	const CF_V3 axes[] = {
+		cf_v3(1.f, 0.f, 0.f), cf_v3(0.f, 1.f, 0.f), cf_v3(0.f, 0.f, 1.f),
+	};
+	const CF_Color colors[] = {
+		cf_make_color_rgba_f(0.9f, 0.3f, 0.3f, 0.9f),
+		cf_make_color_rgba_f(0.3f, 0.9f, 0.3f, 0.9f),
+		cf_make_color_rgba_f(0.3f, 0.5f, 1.f, 0.9f),
+	};
+	for (int i = 0; i < 3; ++i) {
+		cf_draw3d_push_color(colors[i]);
+		cf_draw3d_arrow(
+			at, cf_add_v3(at, cf_mul_v3_f(axes[i], length)),
+			GIZMO_THICKNESS, ARROW_WIDTH * 0.5f
+		);
+		cf_draw3d_pop_color();
+	}
+}
+
 static void
 draw3d_cone(const gizmo_t* gizmo) {
 	float half_angle = gizmo->values[0];
@@ -717,6 +1037,9 @@ draw3d_cone(const gizmo_t* gizmo) {
 		CF_V3 to = cf_add_v3(at, cf_mul_v3_f(dir, outer));
 		cf_draw3d_line(from, to, GIZMO_THICKNESS);
 	}
+
+	// The ring handle, on the silhouette so it is always in reach
+	draw3d_handle(cone_handle_point(at, axis, half_angle, outer));
 }
 
 static void
@@ -739,6 +1062,7 @@ draw_gizmo_3d(const gizmo_t* gizmo) {
 				cf_v3(at.x, at.y, at.z + CROSSHAIR_SIZE),
 				GIZMO_THICKNESS
 			);
+			draw3d_stems(at);
 			draw3d_handle(at);
 		} break;
 		case GIZMO_RADIUS: {
@@ -789,6 +1113,7 @@ debug_draw_end(void) {
 		cf_draw3d_push_stroke_pixels(true);
 	}
 
+	int drag_param = drag.kind != DRAG_NONE ? drag.param_index : -1;
 	for (int i = 0; i < num_gizmos; ++i) {
 		const gizmo_t* gizmo = &gizmos[i];
 
