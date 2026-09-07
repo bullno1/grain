@@ -48,6 +48,7 @@ A module is a self-contained compilation unit with:
 
   Inside `process` the sampler is referenced by its name, and a companion `vec4 name_uvrect` holds the bound texture's UV rect, `(0,0)-(1,1)`, for a raw texture, or the sprite's region inside its atlas.
   `atlas_uv(name_uvrect, uv)` maps a unit UV into that rect.
+  For pixel art, `texture_smooth(name, name_uvrect, uv)` samples the same way but keeps texels crisp under a linear filter (a fragment-stage port of Cute Framework's `smooth_uv`, which is also available as `smooth_uv(uv, texture_size)` and `smooth_uv(uv, name_uvrect, texture_size)`).
 
   Textures are bound per pool with `grain_set_texture` (raw `CF_Texture` plus optional UV rect and `CF_Sampler`)
   For a sprite, use: `grain_set_sprite`.

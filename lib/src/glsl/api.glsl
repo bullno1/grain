@@ -122,6 +122,33 @@ void cull() {
 
 vec4 grain_Color;
 
+// Pixel-art sampling under a linear filter, same as Cute Framework's smooth_uv:
+// snaps uv to texel centers and lets the filter blend only within the one
+// screen-pixel band around each texel seam, so scaled and rotated sprites keep
+// crisp texels with antialiased edges. Once texels shrink below a screen pixel
+// it degrades to plain linear sampling.
+vec2 smooth_uv(vec2 uv, vec2 texture_size) {
+	vec2 pixel = uv * texture_size;
+	vec2 seam = floor(pixel + 0.5);
+	pixel = seam + clamp((pixel - seam) / fwidth(pixel), -0.5, 0.5);
+	return pixel / texture_size;
+}
+
+// Also keeps the result inside uvrect by half a texel, so a sprite's edge
+// clamps to its own texels instead of bleeding into its atlas neighbors
+vec2 smooth_uv(vec2 uv, vec4 uvrect, vec2 texture_size) {
+	uv = smooth_uv(uv, texture_size);
+	vec2 half_texel = 0.5 / texture_size;
+	return clamp(uv, uvrect.xy + half_texel, uvrect.zw - half_texel);
+}
+
+// texture(image, atlas_uv(image_uvrect, uv)) for pixel art: the unit uv is
+// mapped into the atlas rect, smoothed, and clamped to the rect
+vec4 texture_smooth(sampler2D image, vec4 uvrect, vec2 uv) {
+	vec2 texture_size = vec2(textureSize(image, 0));
+	return texture(image, smooth_uv(atlas_uv(uvrect, uv), uvrect, texture_size));
+}
+
 #endif
 
 #include "grain/sdf.glsl"
