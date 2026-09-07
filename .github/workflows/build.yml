@@ -34,6 +34,11 @@ jobs:
           RELOADABLE: OFF
         run: cmd/steamrt/build
 
+      - name: Test
+        env:
+          RELOADABLE: OFF
+        run: cmd/steamrt/test
+
   web:
     name: Web
     runs-on: ubuntu-latest
@@ -100,6 +105,9 @@ jobs:
         env:
           GENERATOR: "Ninja Multi-Config"
         run: cmd/win/build.bat
+
+      - name: Test
+        run: cmd/win/test.bat
 
   deploy:
     environment:

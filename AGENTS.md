@@ -19,7 +19,7 @@ All build scripts accept `BUILD_TYPE` (default `RelWithDebInfo`) and `RELOADABLE
 - Single test: pass exact suite name, optionally exact test name, to the test binary:
   `bin/linux/RelWithDebInfo-reloadable/grain-tests <suite> [test]`
   (e.g. `grain-tests decorator/scanner`)
-- Web: `cmd/web/build` (emscripten; forces `RELOADABLE=OFF`, tests are excluded). Windows: `cmd/win/prepare.bat` then `cmd/win/build.bat`. Steam Runtime: `cmd/steamrt/*`.
+- Web: `cmd/web/build` (emscripten; forces `RELOADABLE=OFF`, tests are excluded). Windows: `cmd/win/prepare.bat` then `cmd/win/build.bat`, tests via `cmd/win/test.bat`. Steam Runtime: `cmd/steamrt/*` (`cmd/steamrt/test` runs the tests inside the SDK container).
 
 CMake exports `compile_commands.json` into `.build/<platform>/<config>/`.
 
