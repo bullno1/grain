@@ -2,14 +2,16 @@
 // systems from two pools.
 //
 // * Rising: a steady Trail system follows the rocket, which the CPU
-//   integrates and steers toward a random apex.
+//   integrates and steers toward a random apex. The rocket's pose is the
+//   trail system's transform: the emitter works in the rocket's local frame
+//   and the CPU never touches its position params.
 // * Exploding: at the apex the trail stops emitting and a Burst system in
-//   the other pool fires one burst of sparks.
+//   the other pool, placed by its own transform, fires one burst of sparks.
 //
 // The phase switch is CPU-side; the particles themselves only ever live on
 // the GPU. Every live system is a separate grain_system_t, so with several
 // shots in the air the demo also exercises many systems per pool, each with
-// its own parameters, in one batched draw.
+// its own parameters and transform, in one batched draw.
 //
 // Both effects are baked by grainc from firework_trail.json and
 // firework_burst.json: tuned values come from the files, and the per-shot
@@ -64,6 +66,21 @@ typedef struct {
 	float time;
 } demo_t;
 
+// The rocket's pose as the trail system's local-to-world transform: local +y
+// points along the velocity so the emitter can trail sparks behind it
+static void
+set_rocket_transform(shot_t* shot) {
+	float speed = cf_len(shot->velocity);
+	// Heading as a rotation of the +y axis; straight up when standing still
+	CF_V2 up = speed > 0.f ? cf_div_v2_f(shot->velocity, speed) : cf_v2(0.f, 1.f);
+	CF_M3x2 pose = {
+		.m = { .x = cf_v2(up.y, -up.x), .y = up },
+		.p = shot->position,
+	};
+	grain_set_transform_2d(shot->trail, pose);
+	grain_set(shot->trail, grain_firework_trail.Trail.speed, speed);
+}
+
 static void
 launch(demo_t* demo) {
 	shot_t* shot = NULL;
@@ -92,8 +109,9 @@ launch(demo_t* demo) {
 	};
 
 	// Tuned values and the emission rate come from the effect file; the
-	// rocket's position and velocity follow per frame
+	// rocket's pose follows per frame through the transform
 	grain_blueprint_apply(demo->trail_blueprint, trail);
+	set_rocket_transform(shot);
 }
 
 static void
@@ -115,7 +133,9 @@ explode(demo_t* demo, shot_t* shot) {
 	float max_speed = cf_rnd_range_float(rnd, 160.f, 260.f);
 
 	grain_blueprint_apply(demo->burst_blueprint, burst);
-	grain_set(burst, grain_firework_burst.Burst.position, shot->position);
+	// The explosion point is the system's transform; the emitter stays at
+	// its local origin
+	grain_set_transform_2d(burst, cf_make_translation_v2(shot->position));
 	grain_set(burst, grain_firework_burst.Burst.min_speed, max_speed * 0.25f);
 	grain_set(burst, grain_firework_burst.Burst.max_speed, max_speed);
 	grain_set(burst, grain_firework_burst.Burst.drift, cf_v2(shot->velocity.x * 0.3f, shot->velocity.y * 0.15f));
@@ -135,8 +155,7 @@ update_shots(demo_t* demo, float dt) {
 		if (shot->phase == SHOT_RISING) {
 			shot->velocity.y -= ROCKET_GRAVITY * dt;
 			shot->position = cf_add_v2(shot->position, cf_mul_v2_f(shot->velocity, dt));
-			grain_set(shot->trail, grain_firework_trail.Trail.position, shot->position);
-			grain_set(shot->trail, grain_firework_trail.Trail.velocity, shot->velocity);
+			set_rocket_transform(shot);
 
 			if (shot->position.y >= shot->apex_y || shot->velocity.y <= 0.f) {
 				explode(demo, shot);
