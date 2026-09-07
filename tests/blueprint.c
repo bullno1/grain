@@ -383,6 +383,9 @@ BTEST(blueprint, emit_parse_round_trip) {
 	);
 	BTEST_EXPECT_EQUAL("%d", grain_blueprint_num_textures(&parsed), 2);
 
+	// No bounds were set, so none were written
+	BTEST_EXPECT(!grain_blueprint_bounds(&parsed, NULL));
+
 	grain_blueprint_cleanup(&parsed);
 	grain_blueprint_cleanup(&bp);
 	sfree(json_text);
@@ -395,6 +398,94 @@ BTEST(blueprint, emit_parse_round_trip) {
 // (a module definition resets the transient arena) up until serialization.
 // The document stores string pointers without copying, so serializing garbage
 // here means emit leaked a reference into memory it does not own.
+BTEST(blueprint, bounds_round_trip) {
+	grain_blueprint_t bp = {
+		.name = sintern("Bounded"),
+		.max_systems = 1,
+		.max_emission_rate = 10.f,
+		.lifetime_budget = 1.f,
+	};
+	bp.renderer_slot.module = sintern("Quad");
+	apush(bp.modules, ((grain_blueprint_module_t){
+		.ref = { .kind = GRAIN_MODULE_RENDERER },
+		.name = sintern("Quad"),
+		.source = test_strdup("Renderer(Quad)\n"),
+	}));
+
+	// An empty bounds clears rather than stores
+	grain_blueprint_set_bounds(&bp, grain_bounds_empty());
+	BTEST_EXPECT(!grain_blueprint_bounds(&bp, NULL));
+
+	grain_bounds_t bounds = {
+		.min = { -1.25f, -3.f, 0.f },
+		.max = { 2.5f, 0.1f, 7.f },
+	};
+	grain_blueprint_set_bounds(&bp, bounds);
+	grain_bounds_t stored;
+	BTEST_ASSERT(grain_blueprint_bounds(&bp, &stored));
+	BTEST_EXPECT_EQUAL("%f", stored.max[1], 0.1f);
+
+	CF_JDoc out_doc = cf_make_json(NULL, 0);
+	CF_JVal root = grain_save_blueprint(&bp, out_doc);
+	cf_json_set_root(out_doc, root);
+	char* json_text = cf_json_to_string(out_doc);
+
+	grain_blueprint_t parsed = { 0 };
+	bool ok;
+	CF_JDoc in_doc = test_parse(json_text, &parsed, &ok);
+	BTEST_ASSERT_EX(ok, "%s", grain_get_last_error(test_grain()));
+
+	grain_bounds_t loaded;
+	BTEST_ASSERT(grain_blueprint_bounds(&parsed, &loaded));
+	for (int i = 0; i < 3; ++i) {
+		BTEST_EXPECT_EQUAL("%f", loaded.min[i], bounds.min[i]);
+		BTEST_EXPECT_EQUAL("%f", loaded.max[i], bounds.max[i]);
+	}
+
+	grain_blueprint_cleanup(&parsed);
+	cf_destroy_json(in_doc);
+	sfree(json_text);
+	cf_destroy_json(out_doc);
+	grain_blueprint_cleanup(&bp);
+}
+
+BTEST(blueprint, bounds_accept_2d_and_reject_junk) {
+	static const char* bounded_2d =
+		"{"
+		"	\"grain_version\": 1,"
+		"	\"pool\": { \"max_emission_rate\": 1, \"lifetime_budget\": 1 },"
+		"	\"modules\": [ { \"kind\": \"renderer\", \"name\": \"Quad\", \"source\": \"\" } ],"
+		"	\"archetype\": { \"renderer\": { \"module\": \"Quad\" } },"
+		"	\"bounds\": { \"min\": [-4, -2], \"max\": [4, 2] }"
+		"}";
+	grain_blueprint_t bp = { 0 };
+	bool ok;
+	CF_JDoc doc = test_parse(bounded_2d, &bp, &ok);
+	BTEST_ASSERT_EX(ok, "%s", grain_get_last_error(test_grain()));
+	grain_bounds_t bounds;
+	BTEST_ASSERT(grain_blueprint_bounds(&bp, &bounds));
+	BTEST_EXPECT_EQUAL("%f", bounds.min[0], -4.f);
+	BTEST_EXPECT_EQUAL("%f", bounds.min[2], 0.f);
+	BTEST_EXPECT_EQUAL("%f", bounds.max[1], 2.f);
+	BTEST_EXPECT_EQUAL("%f", bounds.max[2], 0.f);
+	grain_blueprint_cleanup(&bp);
+	cf_destroy_json(doc);
+
+	static const char* junk =
+		"{"
+		"	\"grain_version\": 1,"
+		"	\"pool\": { \"max_emission_rate\": 1, \"lifetime_budget\": 1 },"
+		"	\"modules\": [ { \"kind\": \"renderer\", \"name\": \"Quad\", \"source\": \"\" } ],"
+		"	\"archetype\": { \"renderer\": { \"module\": \"Quad\" } },"
+		"	\"bounds\": { \"min\": [0, 0, 0], \"max\": \"big\" }"
+		"}";
+	doc = test_parse(junk, &bp, &ok);
+	BTEST_EXPECT(!ok);
+	GRAIN_EXPECT_ERROR_CONTAINS("bounds.max");
+	grain_blueprint_cleanup(&bp);
+	cf_destroy_json(doc);
+}
+
 BTEST(blueprint, saved_doc_borrows_only_from_blueprint) {
 	const char* source = "Renderer(Quad)\n@range(0)\nfloat scale;\n";
 	const char* path = "renderers/Quad.glsl";

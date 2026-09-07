@@ -153,6 +153,8 @@ grain_load_blueprint_baked(grain_t* grain, const grain_baked_effect_t* baked) {
 	blueprint->max_emission_rate = baked->max_emission_rate;
 	blueprint->lifetime_budget = baked->lifetime_budget;
 	blueprint->max_burst_size = baked->max_burst_size;
+	blueprint->has_bounds = baked->has_bounds;
+	blueprint->bounds = baked->has_bounds ? baked->bounds : grain_bounds_empty();
 	blueprint->archetype = archetype;
 
 	// Module records without sources: keeps counts coherent for the module
@@ -330,6 +332,8 @@ grain_bake(
 	out->max_emission_rate = blueprint->max_emission_rate;
 	out->lifetime_budget = blueprint->lifetime_budget;
 	out->max_burst_size = blueprint->max_burst_size;
+	out->has_bounds = blueprint->has_bounds;
+	out->bounds = blueprint->bounds;
 
 	for (int i = 0; i < asize(archetype->emitters); ++i) {
 		apush(scratch->emitters, grain_bake_module_info(&archetype->emitters[i]));

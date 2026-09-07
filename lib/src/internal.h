@@ -4,6 +4,7 @@
 #include <grain.h>
 #include <cute.h>
 #include "dsl.h"
+#include "clock.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #	define GRAIN_FORMAT_ATTRIBUTE(FMT, VA) __attribute__((format(printf, FMT, VA)))
@@ -55,7 +56,117 @@ struct grain_archetype_s {
 
 	// Hash of the attribute list (name, type)
 	uint64_t attr_layout_hash;
+
+	// Generated sources kept for the lazily compiled probe shader; unset for
+	// baked archetypes, which cannot be probed
+	bool has_probe_sources;
+	grain_dsl_probe_sources_t probe_sources;
 };
+
+typedef struct {
+	CF_StorageBuffer gpu;
+	void* cpu;
+	bool dirty;
+} grain_ssbo_t;
+
+typedef struct {
+	const char* module_name;
+	const char* name;
+	CF_ShaderInfoDataType type;
+	int offset;
+	int size;
+} grain_param_slot_t;
+
+typedef struct {
+	CK_DYNA grain_param_slot_t* slots;
+	int stride;
+} grain_param_layout_t;
+
+typedef struct {
+	const char* module_name;  // interned, keys migration across reloads
+	const char* name;         // interned sampler local name
+	grain_texture_binding_t binding;
+	bool bound;
+} grain_pool_sampler_t;
+
+struct grain_system_s {
+	grain_pool_t* pool;
+	CF_M4x4 transform;  // local -> world, see grain_set_transform
+};
+
+struct grain_pool_s {
+	grain_t* grain;
+	grain_pool_opts_t opts;
+
+	grain_ssbo_t update_ssbo;
+	grain_ssbo_t render_ssbo;
+	grain_ssbo_t clock_ssbo;
+	grain_ssbo_t draw_list;
+
+	CF_Canvas canvases[2];
+	CF_Material material;
+	bool pingpong;
+
+	grain_system_t* systems;
+	grain_particle_clock_t* clocks;
+
+	grain_pool_t* update_next;
+	bool queued_for_update;
+
+	grain_pool_t* render_next;
+	bool queued_for_render;
+
+	int pool_size;
+	int num_draws;
+
+	// Layout snapshot to detect reload
+	uint32_t archetype_revision;
+	uint64_t attr_layout_hash;
+	grain_param_layout_t update_layout;
+	grain_param_layout_t render_layout;
+
+	// Parallel to the archetype's sampler slots
+	CK_DYNA grain_pool_sampler_t* sampler_bindings;
+
+	CF_RenderState render_state;
+
+	// Probe pass state, created on the first grain_probe_system (probe.c);
+	// zero handles until then
+	CF_Canvas probe_canvas;
+	grain_ssbo_t probe_list;
+};
+
+// Shared between grain.c and probe.c
+
+void
+grain_init_ssbo(grain_ssbo_t* ssbo, int size);
+
+void
+grain_cleanup_ssbo(grain_ssbo_t* ssbo);
+
+//! Upload the first `size` bytes if anything was written since the last sync
+void
+grain_sync_ssbo(grain_ssbo_t* ssbo, int size);
+
+//! CPU-side slot `index`, marking the buffer dirty
+void*
+grain_index_ssbo(grain_ssbo_t* ssbo, int item_size, int index);
+
+//! Catch the pool up with its archetype after a redefinition
+void
+grain_reconcile_pool(grain_pool_t* pool);
+
+//! Index of the highest allocated system, 0 when none
+int
+grain_find_system_hwm(grain_pool_t* pool);
+
+//! Bind the attribute textures of the pool's current read canvas to its material
+void
+grain_bind_pool_textures(grain_pool_t* pool);
+
+//! Release the probe canvas and buffer if they exist (probe.c)
+void
+grain_cleanup_pool_probe(grain_pool_t* pool);
 
 struct grain_s {
 	// Set only by the headless tests (which build this struct by hand):

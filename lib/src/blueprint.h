@@ -41,6 +41,10 @@ struct grain_blueprint_s {
 	float lifetime_budget;
 	int max_burst_size;
 
+	// Measured bounds (grain_probe_system), system-local; optional
+	bool has_bounds;
+	grain_bounds_t bounds;
+
 	// source/path are cf_alloc copies owned by the blueprint; names are interned
 	CK_DYNA grain_blueprint_module_t* modules;
 

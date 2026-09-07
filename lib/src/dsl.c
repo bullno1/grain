@@ -612,6 +612,100 @@ fail:
 	return false;
 }
 
+static char*
+grain_dsl_strdup(const char* str) {
+	size_t len = strlen(str);
+	char* copy = cf_alloc(len + 1);
+	memcpy(copy, str, len + 1);
+	return copy;
+}
+
+grain_dsl_probe_sources_t
+grain_dsl_copy_probe_sources(
+	grain_archetype_spec_t spec,
+	const char* attrs_source,
+	const char* archetype_internal_source,
+	const char* render_source
+) {
+	grain_module_t* renderer = (grain_module_t*)spec.renderer;
+	return (grain_dsl_probe_sources_t){
+		.renderer_name = grain_dsl_strdup(renderer->info->name),
+		.renderer_source = grain_dsl_strdup(renderer->source),
+		.attrs_source = grain_dsl_strdup(attrs_source),
+		.archetype_internal_source = grain_dsl_strdup(archetype_internal_source),
+		.render_source = grain_dsl_strdup(render_source),
+	};
+}
+
+void
+grain_dsl_free_probe_sources(grain_dsl_probe_sources_t* sources) {
+	cf_free(sources->renderer_name);
+	cf_free(sources->renderer_source);
+	cf_free(sources->attrs_source);
+	cf_free(sources->archetype_internal_source);
+	cf_free(sources->render_source);
+	*sources = (grain_dsl_probe_sources_t){ 0 };
+}
+
+bool
+grain_dsl_compile_probe(
+	grain_t* grain,
+	const grain_dsl_probe_sources_t* sources,
+	grain_dsl_archetype_shaders_t* out
+) {
+	// The render stage's include graph only: emitters and affectors never
+	// reach it (see the render source generation in grain_define_archetype)
+	grain_vfs_entry_t vfs_entries[] = {
+		{ .name = "grain/api.glsl", .content = (const char*)XINCBIN_GET(grain_api).data },
+		{ .name = "grain/sdf.glsl", .content = (const char*)XINCBIN_GET(grain_sdf).data },
+		{ .name = "grain/transform.glsl", .content = (const char*)XINCBIN_GET(grain_transform).data },
+		{ .name = "grain/internal.glsl", .content = (const char*)XINCBIN_GET(grain_internal).data },
+		{
+			.name = grain_sprintf(grain, "renderer/%s", sources->renderer_name),
+			.content = sources->renderer_source,
+		},
+		{ .name = "archetype/attrs.glsl", .content = sources->attrs_source },
+		{ .name = "archetype/internal.glsl", .content = sources->archetype_internal_source },
+		{ .name = "archetype/render.glsl", .content = sources->render_source },
+		{ 0 },
+	};
+
+	CF_ShaderBytecode probe_vs_bytecode = { 0 };
+	CF_ShaderBytecode probe_fs_bytecode = { 0 };
+
+	if (!grain_dsl_compile_for_cf(
+		grain,
+		vfs_entries,
+		CSPV_STAGE_VERTEX,
+		(const char*)XINCBIN_GET(grain_probe_vs).data,
+		&probe_vs_bytecode
+	)) {
+		goto fail;
+	}
+
+	if (!grain_dsl_compile_for_cf(
+		grain,
+		vfs_entries,
+		CSPV_STAGE_FRAGMENT,
+		(const char*)XINCBIN_GET(grain_probe_fs).data,
+		&probe_fs_bytecode
+	)) {
+		goto fail;
+	}
+
+	out->probe_vert_bytecode = probe_vs_bytecode;
+	out->probe_frag_bytecode = probe_fs_bytecode;
+	if (!grain->headless) {
+		out->probe_shader = cf_make_shader_from_bytecode(probe_vs_bytecode, probe_fs_bytecode);
+	}
+	return true;
+
+fail:
+	grain_dsl_free_bytecode(probe_vs_bytecode);
+	grain_dsl_free_bytecode(probe_fs_bytecode);
+	return false;
+}
+
 #define CUTE_SPIRV_IMPLEMENTATION
 #include "cute_spirv.h"
 

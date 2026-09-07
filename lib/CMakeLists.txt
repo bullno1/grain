@@ -4,6 +4,7 @@ set(SOURCES
 	"src/decorator.c"
 	"src/baked.c"
 	"src/blueprint.c"
+	"src/probe.c"
 	"src/gen/update_vert_bytecode.h"
 )
 

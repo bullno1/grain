@@ -7,74 +7,6 @@
 // RGBA32F
 #define GRAIN_TEXTURE_CAPACITY (sizeof(float) * 4)
 
-struct grain_system_s {
-	grain_pool_t* pool;
-	CF_M4x4 transform;  // local -> world, see grain_set_transform
-};
-
-typedef struct {
-	CF_StorageBuffer gpu;
-	void* cpu;
-	bool dirty;
-} grain_ssbo_t;
-
-typedef struct {
-	const char* module_name;
-	const char* name;
-	CF_ShaderInfoDataType type;
-	int offset;
-	int size;
-} grain_param_slot_t;
-
-typedef struct {
-	CK_DYNA grain_param_slot_t* slots;
-	int stride;
-} grain_param_layout_t;
-
-typedef struct {
-	const char* module_name;  // interned, keys migration across reloads
-	const char* name;         // interned sampler local name
-	grain_texture_binding_t binding;
-	bool bound;
-} grain_pool_sampler_t;
-
-struct grain_pool_s {
-	grain_t* grain;
-	grain_pool_opts_t opts;
-
-	grain_ssbo_t update_ssbo;
-	grain_ssbo_t render_ssbo;
-	grain_ssbo_t clock_ssbo;
-	grain_ssbo_t draw_list;
-
-	CF_Canvas canvases[2];
-	CF_Material material;
-	bool pingpong;
-
-	grain_system_t* systems;
-	grain_particle_clock_t* clocks;
-
-	grain_pool_t* update_next;
-	bool queued_for_update;
-
-	grain_pool_t* render_next;
-	bool queued_for_render;
-
-	int pool_size;
-	int num_draws;
-
-	// Layout snapshot to detect reload
-	uint32_t archetype_revision;
-	uint64_t attr_layout_hash;
-	grain_param_layout_t update_layout;
-	grain_param_layout_t render_layout;
-
-	// Parallel to the archetype's sampler slots
-	CK_DYNA grain_pool_sampler_t* sampler_bindings;
-
-	CF_RenderState render_state;
-};
-
 typedef struct {
 	const char* first_decl_module_name;
 	const char* first_decl_module_type;
@@ -110,6 +42,16 @@ grain_cleanup_archetype(grain_archetype_t* archetype) {
 		grain_dsl_free_bytecode(archetype->shaders.update_frag_bytecode);
 		grain_dsl_free_bytecode(archetype->shaders.render_vert_bytecode);
 		grain_dsl_free_bytecode(archetype->shaders.render_frag_bytecode);
+	}
+	// The probe shader is only ever compiled by grain itself
+	grain_dsl_free_bytecode(archetype->shaders.probe_vert_bytecode);
+	grain_dsl_free_bytecode(archetype->shaders.probe_frag_bytecode);
+	if (archetype->shaders.probe_shader.id != 0) {
+		cf_destroy_shader(archetype->shaders.probe_shader);
+	}
+	if (archetype->has_probe_sources) {
+		grain_dsl_free_probe_sources(&archetype->probe_sources);
+		archetype->has_probe_sources = false;
 	}
 	afree(archetype->emitters);
 	afree(archetype->affectors);
@@ -1292,6 +1234,11 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		.birth_channel = birth_lane % 4,
 		.revision = revision,
 		.attr_layout_hash = attr_layout_hash,
+
+		.has_probe_sources = true,
+		.probe_sources = grain_dsl_copy_probe_sources(
+			spec, archetype_attrs, archetype_internal, archetype_render
+		),
 	};
 
 	// Deep-copy storage for decorators
@@ -1468,7 +1415,7 @@ grain_strcpy(grain_t* grain, const char* str) {
 	return copy;
 }
 
-static void
+void
 grain_init_ssbo(grain_ssbo_t* ssbo, int size) {
 	ssbo->gpu = cf_make_storage_buffer(cf_storage_buffer_defaults(size));
 	ssbo->cpu = cf_alloc(size);
@@ -1476,13 +1423,13 @@ grain_init_ssbo(grain_ssbo_t* ssbo, int size) {
 	ssbo->dirty = false;
 }
 
-static void
+void
 grain_cleanup_ssbo(grain_ssbo_t* ssbo) {
 	cf_destroy_storage_buffer(ssbo->gpu);
 	cf_free(ssbo->cpu);
 }
 
-static void
+void
 grain_sync_ssbo(grain_ssbo_t* ssbo, int size) {
 	if (!ssbo->dirty) { return; }
 
@@ -1490,7 +1437,7 @@ grain_sync_ssbo(grain_ssbo_t* ssbo, int size) {
 	ssbo->dirty = false;
 }
 
-static void*
+void*
 grain_index_ssbo(grain_ssbo_t* ssbo, int item_size, int index) {
 	char* cpu_mem = (char*)ssbo->cpu + item_size * index;
 	ssbo->dirty = true;
@@ -1662,7 +1609,7 @@ grain_make_pool_canvases(grain_pool_t* pool) {
 	}
 }
 
-static void
+void
 grain_reconcile_pool(grain_pool_t* pool) {
 	grain_archetype_t* archetype = pool->opts.archetype;
 	if (pool->archetype_revision == archetype->revision) { return; }
@@ -1786,6 +1733,7 @@ grain_destroy_pool(grain_pool_t* pool) {
 	grain_cleanup_ssbo(&pool->render_ssbo);
 	grain_cleanup_ssbo(&pool->clock_ssbo);
 	grain_cleanup_ssbo(&pool->draw_list);
+	grain_cleanup_pool_probe(pool);
 	cf_free(pool);
 }
 
@@ -1926,7 +1874,7 @@ grain_get_transform(grain_system_t* system) {
 	return system->transform;
 }
 
-static int
+int
 grain_find_system_hwm(grain_pool_t* pool) {
 	for (int i = pool->opts.max_systems - 1; i >= 0; --i) {
 		if (pool->systems[i].pool != NULL) {
@@ -1934,6 +1882,17 @@ grain_find_system_hwm(grain_pool_t* pool) {
 		}
 	}
 	return 0;
+}
+
+void
+grain_bind_pool_textures(grain_pool_t* pool) {
+	CF_Canvas src_canvas = pool->canvases[pool->pingpong ? 0 : 1];
+	for (int i = 0; i < pool->opts.archetype->num_textures; ++i) {
+		char name[256];
+		snprintf(name, sizeof(name), "grain_texture_%d", i);
+		cf_material_set_texture_vs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
+		cf_material_set_texture_fs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
+	}
 }
 
 static void
@@ -1962,17 +1921,11 @@ grain_update_pool(grain_t* grain, grain_pool_t* pool) {
 	}
 	grain_sync_ssbo(&pool->clock_ssbo, (system_hwm + 1) * sizeof(grain_clock_entry_t));
 
-	CF_Canvas src_canvas = pool->canvases[pool->pingpong ? 0 : 1];
 	CF_Canvas dst_canvas = pool->canvases[pool->pingpong ? 1 : 0];
 
 	cf_apply_canvas(dst_canvas, true);
 	cf_apply_mesh(grain->dummy_mesh);
-	for (int i = 0; i < pool->opts.archetype->num_textures; ++i) {
-		char name[256];
-		snprintf(name, sizeof(name), "grain_texture_%d", i);
-		cf_material_set_texture_vs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
-		cf_material_set_texture_fs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
-	}
+	grain_bind_pool_textures(pool);
 	// The update pass overwrites attribute texels verbatim: it must never see
 	// the user's render state, whose blending would corrupt the simulation.
 	CF_RenderState update_state = cf_render_state_defaults();
@@ -2218,13 +2171,7 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool, const grain_transforms_t* 
 	grain_sync_ssbo(&pool->draw_list, sizeof(uint32_t) * pool->num_draws);
 
 	cf_apply_mesh(grain->dummy_mesh);
-	CF_Canvas src_canvas = pool->canvases[pool->pingpong ? 0 : 1];
-	for (int i = 0; i < pool->opts.archetype->num_textures; ++i) {
-		char name[256];
-		snprintf(name, sizeof(name), "grain_texture_%d", i);
-		cf_material_set_texture_vs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
-		cf_material_set_texture_fs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
-	}
+	grain_bind_pool_textures(pool);
 
 	// CF_M4x4 is column-major, which is what CF_UNIFORM_TYPE_MAT4 expects
 	cf_material_set_uniform_vs(pool->material, "grain_transform", (void*)transforms->transform, CF_UNIFORM_TYPE_MAT4, 1);

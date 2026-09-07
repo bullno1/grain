@@ -148,14 +148,24 @@ float rand_range(float lo, float hi) {
 
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
 
+// Which corner of the particle's quad this invocation computes. A render pass
+// draws a 4-vertex strip per particle so it is the vertex index; the probe
+// pass (probe.vert.glsl) visits one corner per instance and sets it explicitly.
+#ifdef GRAIN_PROBE
+int grain_corner_index;
+#define GRAIN_CORNER_INDEX grain_corner_index
+#else
+#define GRAIN_CORNER_INDEX gl_VertexIndex
+#endif
+
 vec2 quad() {
-	vec2 corner = vec2(gl_VertexIndex & 1, (gl_VertexIndex >> 1) & 1);  // [0,1]
+	vec2 corner = vec2(GRAIN_CORNER_INDEX & 1, (GRAIN_CORNER_INDEX >> 1) & 1);  // [0,1]
 	return corner - 0.5; // [-0.5, 0.5]
 }
 
 // Unit UV for the current quad corner, y-down to match texture space
 vec2 uv_quad() {
-	vec2 corner = vec2(gl_VertexIndex & 1, (gl_VertexIndex >> 1) & 1);  // [0,1]
+	vec2 corner = vec2(GRAIN_CORNER_INDEX & 1, (GRAIN_CORNER_INDEX >> 1) & 1);  // [0,1]
 	return vec2(corner.x, 1.0 - corner.y);
 }
 

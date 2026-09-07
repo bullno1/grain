@@ -102,6 +102,9 @@ typedef struct {
 	float max_emission_rate;
 	float lifetime_budget;
 	int max_burst_size;
+	// Measured bounds, system-local; see grain_blueprint_bounds
+	bool has_bounds;
+	grain_bounds_t bounds;
 
 	// Archetype reflection
 	const grain_baked_module_t* emitters;

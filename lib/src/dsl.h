@@ -29,7 +29,26 @@ typedef struct {
 	CF_ShaderBytecode update_frag_bytecode;
 	CF_ShaderBytecode render_vert_bytecode;
 	CF_ShaderBytecode render_frag_bytecode;
+
+	// Compiled on the first grain_probe_system of the archetype (see
+	// grain_dsl_compile_probe); zero until then and for baked archetypes
+	CF_Shader probe_shader;
+	CF_ShaderBytecode probe_vert_bytecode;
+	CF_ShaderBytecode probe_frag_bytecode;
 } grain_dsl_archetype_shaders_t;
+
+/**
+ * Everything the probe pass needs to compile the render stage again later,
+ * snapshotted at archetype definition so it matches the running render shader
+ * even if the renderer module is redefined in between. All owned copies.
+ */
+typedef struct {
+	char* renderer_name;
+	char* renderer_source;
+	char* attrs_source;
+	char* archetype_internal_source;
+	char* render_source;
+} grain_dsl_probe_sources_t;
 
 // `samplers` (scanned from the Samplers block, not owned) is declared to the
 // inspect compile so the module body can reference them, and reflected sampler
@@ -52,6 +71,30 @@ grain_dsl_compile_archetype(
 	const char* render_source,
 	grain_dsl_archetype_shaders_t* out
 );
+
+/**
+ * Compile the probe variant of the render stage into `out->probe_*`.
+ *
+ * Headless mode skips the GPU shader object, like grain_dsl_compile_archetype.
+ */
+bool
+grain_dsl_compile_probe(
+	grain_t* grain,
+	const grain_dsl_probe_sources_t* sources,
+	grain_dsl_archetype_shaders_t* out
+);
+
+//! Deep copy of the generated sources a probe compile needs
+grain_dsl_probe_sources_t
+grain_dsl_copy_probe_sources(
+	grain_archetype_spec_t spec,
+	const char* attrs_source,
+	const char* archetype_internal_source,
+	const char* render_source
+);
+
+void
+grain_dsl_free_probe_sources(grain_dsl_probe_sources_t* sources);
 
 void
 grain_dsl_free_bytecode(CF_ShaderBytecode bytecode);

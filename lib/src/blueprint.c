@@ -178,6 +178,62 @@ grain_blueprint_get_number(CF_JVal obj, const char* key, double* out) {
 	return true;
 }
 
+// {"min": [x, y, z], "max": [x, y, z]}; two components are accepted for 2D
+// effects and read as z = 0
+static bool
+grain_blueprint_parse_bounds_corner(
+	grain_t* grain,
+	CF_JVal jbounds,
+	const char* key,
+	float* out
+) {
+	CF_JVal jcorner = cf_json_get(jbounds, key);
+	if (!grain_blueprint_jval_present(jcorner) || !cf_json_is_array(jcorner)) {
+		grain_set_last_error(grain, grain_sprintf(
+			grain, "`bounds.%s` must be an array of 2 or 3 numbers", key
+		));
+		return false;
+	}
+	int len = cf_json_get_len(jcorner);
+	if (len != 2 && len != 3) {
+		grain_set_last_error(grain, grain_sprintf(
+			grain, "`bounds.%s` must be an array of 2 or 3 numbers", key
+		));
+		return false;
+	}
+	out[2] = 0.f;
+	for (int i = 0; i < len; ++i) {
+		CF_JVal element = cf_json_array_get(jcorner, i);
+		if (!grain_blueprint_jval_is_number(element)) {
+			grain_set_last_error(grain, grain_sprintf(
+				grain, "`bounds.%s[%d]` must be a number", key, i
+			));
+			return false;
+		}
+		out[i] = (float)grain_blueprint_jval_to_double(element);
+	}
+	return true;
+}
+
+static bool
+grain_blueprint_parse_bounds(grain_t* grain, CF_JVal jbounds, grain_bounds_t* out) {
+	if (!cf_json_is_object(jbounds)) {
+		grain_set_last_error(grain, "`bounds` must be an object with `min` and `max`");
+		return false;
+	}
+	return grain_blueprint_parse_bounds_corner(grain, jbounds, "min", out->min)
+		&& grain_blueprint_parse_bounds_corner(grain, jbounds, "max", out->max);
+}
+
+static CF_JVal
+grain_blueprint_bounds_corner_to_json(CF_JDoc doc, const float* corner) {
+	CF_JVal jcorner = cf_json_array(doc);
+	for (int i = 0; i < 3; ++i) {
+		cf_json_array_add_double(doc, jcorner, grain_blueprint_json_double(corner[i]));
+	}
+	return jcorner;
+}
+
 static bool
 grain_blueprint_parse_slot(
 	grain_t* grain,
@@ -392,6 +448,14 @@ grain_blueprint_parse(grain_t* grain, CF_JVal root, grain_blueprint_t* blueprint
 	grain_blueprint_get_number(jpool, "max_burst_size", &max_burst_size);
 	blueprint->max_burst_size = (int)max_burst_size;
 
+	CF_JVal jbounds = cf_json_get(root, "bounds");
+	if (grain_blueprint_jval_present(jbounds)) {
+		if (!grain_blueprint_parse_bounds(grain, jbounds, &blueprint->bounds)) {
+			return false;
+		}
+		blueprint->has_bounds = true;
+	}
+
 	CF_JVal jmodules = cf_json_get(root, "modules");
 	if (!grain_blueprint_jval_present(jmodules) || !cf_json_is_array(jmodules)) {
 		grain_set_last_error(grain, "Blueprint is missing a `modules` array");
@@ -596,6 +660,17 @@ grain_save_blueprint(grain_blueprint_t* blueprint, CF_JDoc doc) {
 	);
 	cf_json_object_add_int(doc, jpool, "max_burst_size", blueprint->max_burst_size);
 	cf_json_object_add(doc, root, "pool", jpool);
+
+	if (blueprint->has_bounds) {
+		CF_JVal jbounds = cf_json_object(doc);
+		cf_json_object_add(
+			doc, jbounds, "min", grain_blueprint_bounds_corner_to_json(doc, blueprint->bounds.min)
+		);
+		cf_json_object_add(
+			doc, jbounds, "max", grain_blueprint_bounds_corner_to_json(doc, blueprint->bounds.max)
+		);
+		cf_json_object_add(doc, root, "bounds", jbounds);
+	}
 
 	CF_JVal jmodules = cf_json_array(doc);
 	for (int i = 0; i < asize(blueprint->modules); ++i) {
@@ -923,6 +998,19 @@ grain_blueprint_pool_opts(grain_blueprint_t* blueprint) {
 		.lifetime_budget = blueprint->lifetime_budget,
 		.max_burst_size = blueprint->max_burst_size,
 	};
+}
+
+bool
+grain_blueprint_bounds(grain_blueprint_t* blueprint, grain_bounds_t* out) {
+	if (!blueprint->has_bounds) { return false; }
+	if (out != NULL) { *out = blueprint->bounds; }
+	return true;
+}
+
+void
+grain_blueprint_set_bounds(grain_blueprint_t* blueprint, grain_bounds_t bounds) {
+	blueprint->has_bounds = !grain_bounds_is_empty(bounds);
+	blueprint->bounds = blueprint->has_bounds ? bounds : grain_bounds_empty();
 }
 
 int

@@ -37,6 +37,7 @@ set(SOURCES
 	"blueprint.c"
 	"clock.c"
 	"samples.c"
+	"probe.c"
 	"${CMAKE_CURRENT_BINARY_DIR}/gen/grain_fire.h"
 	"${CMAKE_CURRENT_BINARY_DIR}/gen/grain_snow.h"
 	"${CMAKE_CURRENT_BINARY_DIR}/gen/grain_paths.h"

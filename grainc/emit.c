@@ -671,6 +671,19 @@ grainc_emit_effect_init(
 	grainc_emit_float(out, effect->lifetime_budget);
 	fputs(",\n", out);
 	fprintf(out, "\t.max_burst_size = %d,\n", effect->max_burst_size);
+	if (effect->has_bounds) {
+		fputs("\t.has_bounds = true,\n", out);
+		fputs("\t.bounds = {\n", out);
+		for (int corner = 0; corner < 2; ++corner) {
+			const float* values = corner == 0 ? effect->bounds.min : effect->bounds.max;
+			fprintf(out, "\t\t.%s = { ", corner == 0 ? "min" : "max");
+			for (int i = 0; i < 3; ++i) {
+				grainc_emit_float(out, values[i]);
+				fputs(i < 2 ? ", " : " },\n", out);
+			}
+		}
+		fputs("\t},\n", out);
+	}
 
 	if (effect->num_emitters > 0) {
 		fprintf(out, "\t.emitters = %s_emitters,\n", prefix);

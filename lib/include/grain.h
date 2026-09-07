@@ -413,6 +413,84 @@ typedef enum {
 	GRAIN_VIEW_3D,
 } grain_view_t;
 
+// ---- Probe: read a system's particles back from the GPU ----
+
+typedef struct grain_probe_s grain_probe_t;
+
+//! Axis-aligned bounds. Empty when min > max on any axis.
+typedef struct {
+	float min[3];
+	float max[3];
+} grain_bounds_t;
+
+//! One pool slot as the renderer saw it
+typedef struct {
+	bool live;              // the renderer did not cull it
+	float age;              // seconds since birth; 0 when not live
+	grain_bounds_t bounds;  // of its rendered geometry, world space (see grain_probe_system)
+} grain_probe_slot_t;
+
+typedef struct {
+	float elapsed;          // the system clock at capture
+	float emit_cursor;      // slot the emission counter points at, [0, num_slots)
+
+	int num_slots;          // == the pool's pool_size
+	const grain_probe_slot_t* slots;
+
+	// Aggregates over live slots
+	int num_live;
+	float max_age;          // 0 when nothing is live
+	grain_bounds_t bounds;  // empty when nothing is live
+} grain_probe_result_t;
+
+/**
+ * Capture a system's particles as the renderer sees them.
+ *
+ * Runs the archetype's render stage in probe mode: the same modules decide
+ * liveness and geometry, but the view transforms (`grain_transform`,
+ * `grain_transform3d`, `grain_projection`) are identity, so positions come
+ * out in world space, and each slot lands in a readback canvas instead of
+ * the screen. The system's own transform (@ref grain_set_transform) applies
+ * as usual, so probing a system at the identity transform measures the
+ * effect in system-local space, which is what blueprint bounds store. Call
+ * between grain_end_update and the next grain_begin_update.
+ *
+ * The GPU copy is asynchronous: poll @ref grain_probe_ready once per frame
+ * after presenting. The first probe of an archetype compiles its probe
+ * shader; later ones reuse it. Costs one small draw and a readback of
+ * pool_size texels, intended for editors and offline tools, not per-frame
+ * game use.
+ *
+ * Baked archetypes (grain_baked.h) carry no shader source and cannot be
+ * probed.
+ *
+ * @return NULL on failure (see @ref grain_get_last_error).
+ */
+grain_probe_t*
+grain_probe_system(grain_system_t* system);
+
+bool
+grain_probe_ready(grain_probe_t* probe);
+
+//! NULL until ready. Owned by the probe; valid until grain_destroy_probe.
+const grain_probe_result_t*
+grain_probe_result(grain_probe_t* probe);
+
+void
+grain_destroy_probe(grain_probe_t* probe);
+
+// ---- Bounds helpers ----
+
+grain_bounds_t
+grain_bounds_empty(void);
+
+bool
+grain_bounds_is_empty(grain_bounds_t bounds);
+
+//! Grow `bounds` to cover `other`; either may be empty
+void
+grain_bounds_union(grain_bounds_t* bounds, grain_bounds_t other);
+
 typedef struct {
 	//! Saved as the archetype name when the blueprint is loaded; defaults to "Effect"
 	const char* name;
@@ -517,6 +595,22 @@ grain_blueprint_archetype(grain_blueprint_t* blueprint);
 //! Saved pool config with `archetype` filled in; tweak max_systems before grain_create_pool
 grain_pool_opts_t
 grain_blueprint_pool_opts(grain_blueprint_t* blueprint);
+
+/**
+ * Baked bounds in system-local space (measured with the identity system
+ * transform); false when the blueprint has none.
+ *
+ * Typically measured by probing the effect (@ref grain_probe_system) over a
+ * run and set with @ref grain_blueprint_set_bounds. The library stores and
+ * saves them verbatim and never culls: the caller tests them against its own
+ * view.
+ */
+bool
+grain_blueprint_bounds(grain_blueprint_t* blueprint, grain_bounds_t* out);
+
+//! Store bounds to be saved with the blueprint; an empty bounds clears them
+void
+grain_blueprint_set_bounds(grain_blueprint_t* blueprint, grain_bounds_t bounds);
 
 /**
  * Write the saved param values and emission rate into a system.
