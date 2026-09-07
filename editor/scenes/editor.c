@@ -878,14 +878,19 @@ fold_probe_result(const grain_probe_result_t* result) {
 static void
 step_probe(void) {
 	if (probe != NULL) {
-		if (!grain_probe_ready(probe)) { return; }
-
-		const grain_probe_result_t* result = grain_probe_result(probe);
-		if (result != NULL) {
-			fold_probe_result(result);
-		} else if (!probe_error_logged) {
-			BLOG_ERROR("Probe readback failed");
-			probe_error_logged = true;
+		const grain_probe_result_t* result;
+		switch (grain_probe_poll(probe, &result)) {
+			case GRAIN_PROBE_PENDING:
+				return;
+			case GRAIN_PROBE_READY:
+				fold_probe_result(result);
+				break;
+			case GRAIN_PROBE_FAILED:
+				if (!probe_error_logged) {
+					BLOG_ERROR("Probe failed: %s", grain_get_last_error(grain));
+					probe_error_logged = true;
+				}
+				break;
 		}
 		grain_destroy_probe(probe);
 		probe = NULL;

@@ -756,16 +756,19 @@ run(
 		grain_end_update(grain);
 		time += args->dt;
 
-		if (probe != NULL && grain_probe_ready(probe)) {
-			const grain_probe_result_t* result = grain_probe_result(probe);
-			if (result == NULL) {
-				fputs(PROBE_TOOL ": probe readback failed\n", stderr);
+		if (probe != NULL) {
+			const grain_probe_result_t* result;
+			grain_probe_status_t status = grain_probe_poll(probe, &result);
+			if (status == GRAIN_PROBE_FAILED) {
+				fprintf(stderr, PROBE_TOOL ": probe failed: %s\n", grain_get_last_error(grain));
 				grain_destroy_probe(probe);
 				return false;
 			}
-			fold_sample(&m, result, pool_size, rate);
-			grain_destroy_probe(probe);
-			probe = NULL;
+			if (status == GRAIN_PROBE_READY) {
+				fold_sample(&m, result, pool_size, rate);
+				grain_destroy_probe(probe);
+				probe = NULL;
+			}
 		}
 		if (probe == NULL) {
 			probe = grain_probe_system(system);
@@ -781,15 +784,16 @@ run(
 
 	// Drain the last capture
 	for (int spin = 0; probe != NULL && spin < 64; ++spin) {
-		if (grain_probe_ready(probe)) {
-			const grain_probe_result_t* result = grain_probe_result(probe);
-			if (result != NULL) { fold_sample(&m, result, pool_size, rate); }
-			grain_destroy_probe(probe);
-			probe = NULL;
-		} else {
+		const grain_probe_result_t* result;
+		grain_probe_status_t status = grain_probe_poll(probe, &result);
+		if (status == GRAIN_PROBE_PENDING) {
 			cf_app_update(NULL);
 			cf_app_draw_onto_screen(false);
+			continue;
 		}
+		if (status == GRAIN_PROBE_READY) { fold_sample(&m, result, pool_size, rate); }
+		grain_destroy_probe(probe);
+		probe = NULL;
 	}
 	if (probe != NULL) { grain_destroy_probe(probe); }
 

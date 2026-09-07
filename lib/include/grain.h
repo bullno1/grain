@@ -456,8 +456,8 @@ typedef struct {
  * between grain_end_update and the next grain_begin_update.
  *
  * The first probe of an archetype compiles its probe shader; later ones
- * reuse it. Costs one small draw and a readback of a few pool_size rows of
- * 8-bit texels, intended for editors and offline tools, not per-frame game
+ * reuse it. Costs one small draw and a readback of four pool_size rows of
+ * float texels, intended for editors and offline tools, not per-frame game
  * use.
  *
  * Baked archetypes (grain_baked.h) carry no shader source and cannot be
@@ -468,12 +468,21 @@ typedef struct {
 grain_probe_t*
 grain_probe_system(grain_system_t* system);
 
-bool
-grain_probe_ready(grain_probe_t* probe);
+typedef enum {
+	GRAIN_PROBE_PENDING = 0,  // the copy has not landed yet; poll again next frame
+	GRAIN_PROBE_READY,        // `out` points at the result
+	GRAIN_PROBE_FAILED,       // final; the reason is in grain_get_last_error
+} grain_probe_status_t;
 
-//! NULL until ready. Owned by the probe; valid until grain_destroy_probe.
-const grain_probe_result_t*
-grain_probe_result(grain_probe_t* probe);
+/**
+ * Poll a probe; the first call after presenting issues the copy out.
+ *
+ * On GRAIN_PROBE_READY `*out` is the result, owned by the probe and valid
+ * until grain_destroy_probe; it stays the same on every later call. `out`
+ * may be NULL when only the status matters.
+ */
+grain_probe_status_t
+grain_probe_poll(grain_probe_t* probe, const grain_probe_result_t** out);
 
 void
 grain_destroy_probe(grain_probe_t* probe);
