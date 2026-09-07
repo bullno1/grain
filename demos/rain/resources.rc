@@ -8,6 +8,6 @@ XINCBIN(rain_affector_integrate, GRAIN_MODULES_DIR "affectors/Integrate.glsl")
 XINCBIN(rain_affector_age, GRAIN_MODULES_DIR "affectors/Age.glsl")
 
 // Modules specific to this demo
-XINCBIN(rain_emitter_raindrop, RAIN_DEMO_DIR "modules/Raindrop.glsl")
-XINCBIN(rain_affector_surface_bounce, RAIN_DEMO_DIR "modules/SurfaceBounce.glsl")
-XINCBIN(rain_renderer_streak, RAIN_DEMO_DIR "modules/Streak.glsl")
+XINCBIN(rain_emitter_raindrop, GRAIN_DEMO_DIR "modules/Raindrop.glsl")
+XINCBIN(rain_affector_surface_bounce, GRAIN_DEMO_DIR "modules/SurfaceBounce.glsl")
+XINCBIN(rain_renderer_streak, GRAIN_DEMO_DIR "modules/Streak.glsl")

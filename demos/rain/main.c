@@ -10,8 +10,8 @@
 #include "resources.rc"
 // Hash stamp of the incbin'd modules: changes when any of them does, so
 // caching compilers rebuild (see CMakeLists.txt)
-#if __has_include("rain_stamp.h")
-#	include "rain_stamp.h"
+#if __has_include("demo_stamp.h")
+#	include "demo_stamp.h"
 #endif
 
 #define WINDOW_WIDTH 960

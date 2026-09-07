@@ -31,7 +31,9 @@ Three targets plus data:
 - `editor/` — `grain-editor`, an interactive authoring app built on the bgame framework (dear imgui UI, scene system).
 - `tests/` — `grain-tests`, headless unit tests using btest from `deps/blibs`.
 - `modules/` — example DSL modules, organized by kind: `emitters/`, `affectors/`, `renderer/`.
-- `demos/` — standalone sample programs (plain CF apps, no bgame), one directory each. `demos/rain/` (`grain-demo-rain`) shows a canvas used as a collision surface: platforms are drawn into an offscreen canvas that a `SurfaceBounce` affector samples. Module sources are incbin'd through a `resources.rc` like `lib/` does; demo-specific modules live in `demos/<name>/modules/`. Desktop only (excluded from the web build).
+- `demos/` — standalone sample programs (plain CF apps, no bgame), one directory each, registered with `grain_add_demo(<name>)` in `demos/CMakeLists.txt` (target `grain-demo-<name>`). Module sources are incbin'd through a `resources.rc` like `lib/` does; demo-specific modules live in `demos/<name>/modules/`. Desktop only (excluded from the web build).
+  - `rain/` — a canvas used as a collision surface: platforms are drawn into an offscreen canvas that a `SurfaceBounce` affector samples.
+  - `firework/` — many systems across two pools: a CPU state machine runs each shot as a steady `Trail` system while rising, then a `Burst` system fired with `grain_burst` at the apex. Systems are kept alive until their particles have died before being destroyed, because reusing a system slot never clears its particles.
 
 ### The DSL and module model
 
