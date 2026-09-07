@@ -1,14 +1,8 @@
 // grainc: bakes a grain effect .json into a single-header C module.
-//
-// Runs the exact runtime pipeline headlessly -- grain_load_blueprint compiles
-// every shader CPU-side through cute-spirv, skipping only GPU objects -- then
-// flattens the result with grain_bake and prints it as C.
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#define BARG_IMPLEMENTATION
 #include <barg.h>
 #include "internal.h"
 #include "baked.h"
@@ -30,13 +24,13 @@ grainc_parse_target(void* userdata, const char* value) {
 		grainc_target_mask_t mask;
 	} targets[] = {
 		{ "gles3", GRAINC_TARGET_GLES3 },
-		{ "webgl2", GRAINC_TARGET_WEBGL2 },
 		{ "vulkan", GRAINC_TARGET_VULKAN },
 		{ "d3d12", GRAINC_TARGET_D3D12 },
 		{ "metal", GRAINC_TARGET_METAL },
 		// Aliases
-		{ "web", GRAINC_TARGET_WEB },
+		{ "web", GRAINC_TARGET_GLES3 },
 		{ "desktop", GRAINC_TARGET_DESKTOP },
+		{ "all", GRAINC_TARGET_ALL },
 	};
 
 	grainc_target_mask_t* out = userdata;
@@ -58,28 +52,40 @@ grainc_parse_args(int argc, char** argv, grainc_args_t* args) {
 			.name = "output",
 			.short_name = 'o',
 			.value_name = "file",
-			.summary = "Output path (default: stdout)",
+			.summary = "Output path",
+			.description = "Default: stdout",
 			.parser = barg_str(&args->output),
 		},
 		{
 			.name = "name",
 			.value_name = "name",
-			.summary = "Effect name for C identifiers "
-				"(default: derived from the blueprint's name)",
+			.summary = "Effect name for C identifiers",
+			.description = "Default: derived from the blueprint's name",
 			.parser = barg_str(&args->name),
 		},
 		{
 			.name = "prefix",
 			.value_name = "prefix",
-			.summary = "Symbol prefix (default: grain_<name>)",
+			.summary = "Symbol prefix",
+			.description = "Default: grain_<name>",
 			.parser = barg_str(&args->prefix),
 		},
 		{
 			.name = "target",
 			.value_name = "api",
-			.summary = "Graphics API to embed shaders for: gles3, webgl2, "
-				"vulkan, d3d12, metal, or the aliases web (webgl2) and "
-				"desktop (all desktop APIs); may be repeated (default: all)",
+			.summary = "Graphics API to embed shaders for, can be repeated",
+			.description =
+				"Default: all\n\n"
+				"Available values:\n\n"
+				"* gles3\n"
+				"* vulkan\n"
+				"* d3d12\n"
+				"* metal\n"
+				"\n"
+				"Or one of the aliases:\n\n"
+				"* web: webgl2\n"
+				"* desktop: all desktop APIs\n"
+				"* all: all graphics APIs",
 			.repeatable = true,
 			.parser = {
 				.userdata = &args->targets,
@@ -279,3 +285,6 @@ cleanup:
 	free(json);
 	return exit_code;
 }
+
+#define BARG_IMPLEMENTATION
+#include <barg.h>

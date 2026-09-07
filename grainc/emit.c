@@ -121,7 +121,7 @@ grainc_emit_bytecode_data(
 		fputs("#endif\n", out);
 	}
 	if (
-		(targets & (GRAINC_TARGET_GLES3 | GRAINC_TARGET_WEBGL2))
+		(targets & GRAINC_TARGET_GLES3)
 		&& bytecode->glsl300_src != NULL
 	) {
 		char name[256];
@@ -217,7 +217,7 @@ grainc_emit_bytecode_init(
 		fputs("#endif\n", out);
 	}
 	if (
-		(targets & (GRAINC_TARGET_GLES3 | GRAINC_TARGET_WEBGL2))
+		(targets & GRAINC_TARGET_GLES3)
 		&& bytecode->glsl300_src != NULL
 	) {
 		fprintf(out, "\t\t.glsl300_src = %s_glsl300_src,\n", sym);

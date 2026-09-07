@@ -8,16 +8,15 @@
 //! One bit per graphics API a baked header can embed shaders for
 typedef enum {
 	GRAINC_TARGET_GLES3 = 1 << 0,   // GLSL 300 es source
-	GRAINC_TARGET_WEBGL2 = 1 << 1,  // GLSL 300 es source
-	GRAINC_TARGET_VULKAN = 1 << 2,  // SPIR-V bytecode
-	GRAINC_TARGET_D3D12 = 1 << 3,   // HLSL source
-	GRAINC_TARGET_METAL = 1 << 4,   // MSL source
+	GRAINC_TARGET_VULKAN = 1 << 1,  // SPIR-V bytecode
+	GRAINC_TARGET_D3D12 = 1 << 2,   // HLSL source
+	GRAINC_TARGET_METAL = 1 << 3,   // MSL source
 } grainc_target_t;
 
 typedef uint32_t grainc_target_mask_t;
 
 //! What `web` aliases to
-#define GRAINC_TARGET_WEB GRAINC_TARGET_WEBGL2
+#define GRAINC_TARGET_WEB GRAINC_TARGET_GLES3
 //! What `desktop` aliases to: every desktop API
 #define GRAINC_TARGET_DESKTOP ( \
 	GRAINC_TARGET_GLES3 \
