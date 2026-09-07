@@ -13,6 +13,26 @@ endif ()
 add_library(grain STATIC EXCLUDE_FROM_ALL "${SOURCES}")
 target_link_libraries(grain PRIVATE cute)
 target_include_directories(grain PUBLIC "include")
+
+# The glsl files are incbin'd at compile time. dsl.c includes a generated
+# stamp header carrying their hashes so that editing one re-embeds it:
+# OBJECT_DEPENDS alone is not enough because ccache hashes only the
+# preprocessed source, never .incbin payloads
+file(GLOB GRAIN_GLSL_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/glsl/*.glsl")
+add_custom_command(
+	OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/glsl_stamp.h"
+	COMMAND ${CMAKE_COMMAND}
+		"-DDIR=${CMAKE_CURRENT_SOURCE_DIR}/src/glsl"
+		"-DOUT=${CMAKE_CURRENT_BINARY_DIR}/glsl_stamp.h"
+		-P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/glsl_stamp.cmake"
+	DEPENDS ${GRAIN_GLSL_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/glsl_stamp.cmake"
+	COMMENT "Stamping embedded glsl"
+)
+target_sources(grain PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/glsl_stamp.h")
+target_include_directories(grain PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+if (WIN32)
+	set_source_files_properties("src/resources.rc" PROPERTIES OBJECT_DEPENDS "${GRAIN_GLSL_SOURCES}")
+endif ()
 if (MSVC)
 	target_compile_definitions(grain PRIVATE GRAIN_SRC_DIR=)
 	target_include_directories(grain PRIVATE "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}/src>")

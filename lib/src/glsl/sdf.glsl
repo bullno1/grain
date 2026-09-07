@@ -40,6 +40,24 @@ float sdf_glow(float d, float falloff) {
 	return exp(-max(d, 0.0) / falloff);
 }
 
+// Transforms map the sample point, so they compose right-to-left:
+//   sd_box(tf_rotate(tf_translate(p, pos), angle), half_size)
+// is a box at `pos` rotated by `angle`.
+
+// Moves the shape by t
+vec2 tf_translate(vec2 p, vec2 t) { return p - t; }
+
+// Rotates the shape counter-clockwise by angle (radians)
+vec2 tf_rotate(vec2 p, float angle) {
+	float c = cos(angle);
+	float s = sin(angle);
+	return vec2(c * p.x + s * p.y, -s * p.x + c * p.y);
+}
+
+// Grows the shape by s; multiply the resulting distance back to keep it
+// a true distance: sd_circle(tf_scale(p, s), r) * s
+vec2 tf_scale(vec2 p, float s) { return p / s; }
+
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
 
 // World-space offset of this quad corner for a shape spanning ±half_extent.

@@ -2,6 +2,11 @@
 #include "internal.h"
 #include <string.h>
 #include "resources.rc"
+// Hash stamp of the incbin'd glsl: changes when any of it does, so caching
+// compilers re-embed (see lib/CMakeLists.txt; generated into the build dir)
+#if __has_include("glsl_stamp.h")
+#	include "glsl_stamp.h"
+#endif
 #include "gen/update_vert_bytecode.h"
 
 typedef struct {
