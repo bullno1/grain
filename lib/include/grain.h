@@ -358,10 +358,24 @@ grain_render(grain_system_t* system);
 void
 grain_end_render(grain_t* grain);
 
+/**
+ * The camera an effect is authored for.
+ *
+ * A hint carried by blueprints so an editor knows whether the renderer works
+ * in `grain_transform` (2D) or `grain_transform3d`/`grain_projection` (3D)
+ * terms. The library itself always uploads both families.
+ */
+typedef enum {
+	GRAIN_VIEW_2D = 0,
+	GRAIN_VIEW_3D,
+} grain_view_t;
+
 typedef struct {
 	//! Saved as the archetype name when the blueprint is loaded; defaults to "Effect"
 	const char* name;
 	float emission_rate;
+	//! Defaults to GRAIN_VIEW_2D
+	grain_view_t view;
 
 	/**
 	 * Optional source path lookup, for reopening in an editor.
@@ -449,6 +463,10 @@ grain_blueprint_name(grain_blueprint_t* blueprint);
 
 float
 grain_blueprint_emission_rate(grain_blueprint_t* blueprint);
+
+//! GRAIN_VIEW_2D when the blueprint predates the `view` field
+grain_view_t
+grain_blueprint_view(grain_blueprint_t* blueprint);
 
 grain_archetype_t*
 grain_blueprint_archetype(grain_blueprint_t* blueprint);

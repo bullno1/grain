@@ -32,6 +32,7 @@ static const char* valid_blueprint =
 	"	\"grain_version\": 1,"
 	"	\"name\": \"Fire\","
 	"	\"emission_rate\": 10.5,"
+	"	\"view\": \"3d\","
 	"	\"pool\": {"
 	"		\"max_systems\": 4,"
 	"		\"max_emission_rate\": 512.5,"
@@ -72,6 +73,7 @@ BTEST(blueprint, parse_valid) {
 
 	BTEST_EXPECT(bp.name == sintern("Fire"));
 	BTEST_EXPECT_EQUAL("%f", bp.emission_rate, 10.5f);
+	BTEST_EXPECT_EQUAL("%d", bp.view, GRAIN_VIEW_3D);
 	BTEST_EXPECT_EQUAL("%d", bp.max_systems, 4);
 	BTEST_EXPECT_EQUAL("%f", bp.max_emission_rate, 512.5f);
 	BTEST_EXPECT_EQUAL("%f", bp.lifetime_budget, 16.f);
@@ -144,6 +146,44 @@ BTEST(blueprint, parse_bad_texture_value) {
 	BTEST_EXPECT(!ok);
 	GRAIN_EXPECT_ERROR_CONTAINS("`Quad.image` must be a path string");
 
+	grain_blueprint_cleanup(&bp);
+	cf_destroy_json(doc);
+}
+
+BTEST(blueprint, parse_view) {
+	// Absent: a pre-3D blueprint is 2D
+	grain_blueprint_t bp = { 0 };
+	bool ok;
+	CF_JDoc doc = test_parse(
+		"{"
+		"	\"grain_version\": 1,"
+		"	\"pool\": { \"max_emission_rate\": 1, \"lifetime_budget\": 1 },"
+		"	\"modules\": ["
+		"		{ \"kind\": \"renderer\", \"name\": \"Quad\", \"source\": \"x\" }"
+		"	],"
+		"	\"archetype\": { \"renderer\": { \"module\": \"Quad\" } }"
+		"}",
+		&bp, &ok
+	);
+	BTEST_ASSERT_EX(ok, "%s", grain_get_last_error(test_grain()));
+	BTEST_EXPECT_EQUAL("%d", bp.view, GRAIN_VIEW_2D);
+	grain_blueprint_cleanup(&bp);
+	cf_destroy_json(doc);
+
+	// Unknown values are rejected rather than silently read as 2D
+	bp = (grain_blueprint_t){ 0 };
+	doc = test_parse(
+		"{"
+		"	\"grain_version\": 1,"
+		"	\"view\": \"iso\","
+		"	\"pool\": { \"max_emission_rate\": 1, \"lifetime_budget\": 1 },"
+		"	\"modules\": [],"
+		"	\"archetype\": {}"
+		"}",
+		&bp, &ok
+	);
+	BTEST_EXPECT(!ok);
+	GRAIN_EXPECT_ERROR_CONTAINS("`view`");
 	grain_blueprint_cleanup(&bp);
 	cf_destroy_json(doc);
 }
@@ -233,6 +273,7 @@ BTEST(blueprint, emit_parse_round_trip) {
 	grain_blueprint_t bp = {
 		.name = sintern("RoundTrip"),
 		.emission_rate = 3.5f,
+		.view = GRAIN_VIEW_3D,
 		.max_systems = 2,
 		.max_emission_rate = 100.f,
 		.lifetime_budget = 8.f,
@@ -297,6 +338,7 @@ BTEST(blueprint, emit_parse_round_trip) {
 
 	BTEST_EXPECT(parsed.name == bp.name);
 	BTEST_EXPECT_EQUAL("%f", parsed.emission_rate, bp.emission_rate);
+	BTEST_EXPECT_EQUAL("%d", parsed.view, bp.view);
 	BTEST_EXPECT_EQUAL("%d", parsed.max_systems, bp.max_systems);
 	BTEST_EXPECT_EQUAL("%f", parsed.max_emission_rate, bp.max_emission_rate);
 	BTEST_EXPECT_EQUAL("%f", parsed.lifetime_budget, bp.lifetime_budget);

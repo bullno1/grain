@@ -34,6 +34,7 @@ typedef struct {
 struct grain_blueprint_s {
 	const char* name;  // interned
 	float emission_rate;
+	grain_view_t view;
 
 	int max_systems;
 	float max_emission_rate;

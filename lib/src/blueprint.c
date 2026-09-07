@@ -356,6 +356,17 @@ grain_blueprint_parse(grain_t* grain, CF_JVal root, grain_blueprint_t* blueprint
 	grain_blueprint_get_number(root, "emission_rate", &emission_rate);
 	blueprint->emission_rate = (float)emission_rate;
 
+	// Optional: blueprints predating the field are 2D
+	const char* view = grain_blueprint_get_string(root, "view");
+	if (view == NULL || strcmp(view, "2d") == 0) {
+		blueprint->view = GRAIN_VIEW_2D;
+	} else if (strcmp(view, "3d") == 0) {
+		blueprint->view = GRAIN_VIEW_3D;
+	} else {
+		grain_set_last_error(grain, "`view` must be \"2d\" or \"3d\"");
+		return false;
+	}
+
 	CF_JVal jpool = cf_json_get(root, "pool");
 	if (!grain_blueprint_jval_present(jpool) || !cf_json_is_object(jpool)) {
 		grain_set_last_error(grain, "Blueprint is missing a `pool` object");
@@ -568,6 +579,10 @@ grain_save_blueprint(grain_blueprint_t* blueprint, CF_JDoc doc) {
 		doc, root, "emission_rate",
 		grain_blueprint_json_double(blueprint->emission_rate)
 	);
+	cf_json_object_add_string(
+		doc, root, "view",
+		blueprint->view == GRAIN_VIEW_3D ? "3d" : "2d"
+	);
 
 	CF_JVal jpool = cf_json_object(doc);
 	cf_json_object_add_int(doc, jpool, "max_systems", blueprint->max_systems);
@@ -746,6 +761,7 @@ grain_snapshot_system(
 	memset(blueprint, 0, sizeof(*blueprint));
 	blueprint->name = sintern(opts.name != NULL ? opts.name : "Effect");
 	blueprint->emission_rate = opts.emission_rate;
+	blueprint->view = opts.view;
 	blueprint->max_systems = pool_opts.max_systems;
 	blueprint->max_emission_rate = pool_opts.max_emission_rate;
 	blueprint->lifetime_budget = pool_opts.lifetime_budget;
@@ -886,6 +902,11 @@ grain_blueprint_name(grain_blueprint_t* blueprint) {
 float
 grain_blueprint_emission_rate(grain_blueprint_t* blueprint) {
 	return blueprint->emission_rate;
+}
+
+grain_view_t
+grain_blueprint_view(grain_blueprint_t* blueprint) {
+	return blueprint->view;
 }
 
 grain_archetype_t*

@@ -48,6 +48,25 @@ SCENE_VAR(int, gui_renderer_index)
 SCENE_VAR(bool, show_system)
 SCENE_VAR(float, emission_rate)
 SCENE_VAR(int, burst_count)
+SCENE_VAR(int, view_mode)  // grain_view_t: the camera the effect is authored for
+
+// Orbit camera of the 3D view, y up
+typedef struct {
+	CF_V3 target;
+	float yaw;       // around y, radians; 0 looks down -z, like the 2D view
+	float pitch;     // above the ground plane, radians
+	float distance;
+	float fov;       // vertical, radians
+} orbit_camera_t;
+SCENE_VAR(orbit_camera_t, camera)
+
+static const orbit_camera_t DEFAULT_CAMERA = {
+	.target = { 0.f, 0.f, 0.f },
+	.yaw = 0.5f,
+	.pitch = 0.4f,
+	.distance = 900.f,
+	.fov = 1.0471976f,  // 60 degrees
+};
 
 SCENE_VAR(grain_pool_opts_t, current_pool_opts)
 SCENE_VAR(grain_pool_opts_t, pending_pool_opts)
@@ -1177,6 +1196,7 @@ bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
 		(grain_save_opts_t){
 			.name = system_name.data[0] != '\0' ? system_name.data : NULL,
 			.emission_rate = emission_rate,
+			.view = (grain_view_t)view_mode,
 			.module_path = save_module_path,
 			.texture_path = save_texture_path,
 		}
@@ -1318,6 +1338,8 @@ reset_editor_system(void) {
 
 	emission_rate = 10.f;
 	burst_count = 50;
+	view_mode = GRAIN_VIEW_2D;
+	camera = DEFAULT_CAMERA;
 	current_pool_opts = pending_pool_opts = DEFAULT_POOL_OPTS;
 	snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
@@ -1480,6 +1502,8 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 	// Params and system state
 	grain_blueprint_apply(blueprint, particle_system);
 	emission_rate = grain_blueprint_emission_rate(blueprint);
+	view_mode = grain_blueprint_view(blueprint);
+	camera = DEFAULT_CAMERA;
 	snprintf(
 		system_name.data, sizeof(system_name.data),
 		"%s", grain_blueprint_name(blueprint)
@@ -1669,6 +1693,8 @@ init(void) {
 
 		emission_rate = 10.f;
 		burst_count = 50;
+		view_mode = GRAIN_VIEW_2D;
+		camera = DEFAULT_CAMERA;
 		current_pool_opts = pending_pool_opts = DEFAULT_POOL_OPTS;
 		snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
@@ -1760,6 +1786,101 @@ cleanup(void) {
 	ufa_release_file_ref(current_file_ref);
 }
 
+// 3D view {{{
+
+static const float CAMERA_NEAR = 1.f;
+static const float CAMERA_FAR = 20000.f;
+static const float GRID_CELL = 50.f;
+static const int GRID_CELLS = 20;  // per side of the origin
+
+static CF_V3
+camera_eye(const orbit_camera_t* cam) {
+	float c = cosf(cam->pitch);
+	CF_V3 offset = cf_v3(sinf(cam->yaw) * c, sinf(cam->pitch), cosf(cam->yaw) * c);
+	return cf_add_v3(cam->target, cf_mul_v3_f(offset, cam->distance));
+}
+
+// Right-drag orbits, middle-drag pans, wheel dollies. Left stays free for
+// gizmo handles. ImGui keeps the mouse whenever it wants it.
+static void
+update_camera(void) {
+	if (ImGui_GetIO()->WantCaptureMouse) { return; }
+
+	float dx = cf_mouse_motion_x();
+	float dy = cf_mouse_motion_y();
+
+	if (cf_mouse_down(CF_MOUSE_BUTTON_RIGHT)) {
+		camera.yaw -= dx * 0.01f;
+		camera.pitch += dy * 0.01f;
+		float limit = CF_PI * 0.5f - 0.01f;
+		if (camera.pitch > limit) { camera.pitch = limit; }
+		if (camera.pitch < -limit) { camera.pitch = -limit; }
+	}
+
+	if (cf_mouse_down(CF_MOUSE_BUTTON_MIDDLE)) {
+		// Screen-aligned, scaled so the point under the cursor follows it
+		CF_V3 forward = cf_norm_v3(cf_sub_v3(camera.target, camera_eye(&camera)));
+		CF_V3 right = cf_norm_v3(cf_cross_v3(forward, cf_v3(0.f, 1.f, 0.f)));
+		CF_V3 up = cf_cross_v3(right, forward);
+		float units_per_pixel =
+			2.f * camera.distance * tanf(camera.fov * 0.5f)
+			/ (float)cf_app_get_canvas_height();
+		camera.target = cf_add_v3(camera.target, cf_mul_v3_f(right, -dx * units_per_pixel));
+		camera.target = cf_add_v3(camera.target, cf_mul_v3_f(up, dy * units_per_pixel));
+	}
+
+	float wheel = cf_mouse_wheel_motion();
+	if (wheel != 0.f) {
+		camera.distance *= powf(0.9f, wheel);
+		if (camera.distance < CAMERA_NEAR * 10.f) { camera.distance = CAMERA_NEAR * 10.f; }
+	}
+}
+
+// grain_end_render and the gizmos read the draw3d stacks; keep them pushed
+// until the frame is presented, since draw commands are flushed then
+static void
+push_camera(void) {
+	float aspect = (float)cf_app_get_canvas_width() / (float)cf_app_get_canvas_height();
+	cf_draw3d_push_projection(cf_perspective(camera.fov, aspect, CAMERA_NEAR, CAMERA_FAR));
+	cf_draw3d_push_view(cf_look_at(camera_eye(&camera), camera.target, cf_v3(0.f, 1.f, 0.f)));
+}
+
+static void
+pop_camera(void) {
+	cf_draw3d_pop_view();
+	cf_draw3d_pop_projection();
+}
+
+// Ground grid on y = 0 with the axes picked out: x red, y green, z blue
+static void
+draw_grid(void) {
+	float extent = GRID_CELL * (float)GRID_CELLS;
+	cf_draw3d_push_stroke_pixels(true);
+
+	cf_draw3d_push_color(cf_make_color_rgba_f(1.f, 1.f, 1.f, 0.15f));
+	for (int i = -GRID_CELLS; i <= GRID_CELLS; ++i) {
+		if (i == 0) { continue; }
+		float t = GRID_CELL * (float)i;
+		cf_draw3d_line(cf_v3(t, 0.f, -extent), cf_v3(t, 0.f, extent), 1.f);
+		cf_draw3d_line(cf_v3(-extent, 0.f, t), cf_v3(extent, 0.f, t), 1.f);
+	}
+	cf_draw3d_pop_color();
+
+	cf_draw3d_push_color(cf_make_color_rgba_f(0.9f, 0.3f, 0.3f, 0.6f));
+	cf_draw3d_line(cf_v3(-extent, 0.f, 0.f), cf_v3(extent, 0.f, 0.f), 1.f);
+	cf_draw3d_pop_color();
+	cf_draw3d_push_color(cf_make_color_rgba_f(0.3f, 0.9f, 0.3f, 0.6f));
+	cf_draw3d_line(cf_v3(0.f, 0.f, 0.f), cf_v3(0.f, extent, 0.f), 1.f);
+	cf_draw3d_pop_color();
+	cf_draw3d_push_color(cf_make_color_rgba_f(0.3f, 0.5f, 1.f, 0.6f));
+	cf_draw3d_line(cf_v3(0.f, 0.f, -extent), cf_v3(0.f, 0.f, extent), 1.f);
+	cf_draw3d_pop_color();
+
+	cf_draw3d_pop_stroke_pixels();
+}
+
+// }}}
+
 static void
 update(void) {
 	cf_app_update(NULL);
@@ -1796,7 +1917,7 @@ update(void) {
 	}
 	ImGui_DockSpaceOverViewportEx(dockspace, NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
 
-	debug_draw_begin();
+	debug_draw_begin((grain_view_t)view_mode);
 
 // Menu bar {{{
 	if (ImGui_BeginMainMenuBar()) {
@@ -1904,6 +2025,18 @@ update(void) {
 		if (ImGui_Begin("System", &show_system, ImGuiWindowFlags_AlwaysAutoResize)) {
 			if (ImGui_InputText("Name", system_name.data, sizeof(system_name.data), 0)) {
 				unsaved_changes = true;
+			}
+
+			static const char* const VIEW_NAMES[] = { "2D", "3D" };
+			if (ImGui_ComboChar("View", &view_mode, VIEW_NAMES, CF_ARRAY_SIZE(VIEW_NAMES))) {
+				unsaved_changes = true;
+			}
+			if (view_mode == GRAIN_VIEW_3D) {
+				if (ImGui_Button("Reset camera")) {
+					camera = DEFAULT_CAMERA;
+				}
+				ImGui_SameLine();
+				ImGui_TextDisabledUnformatted("Right-drag orbits, middle-drag pans, wheel zooms");
 			}
 
 			if (ImGui_DragFloatEx(
@@ -2214,6 +2347,15 @@ update(void) {
 		}
 	}
 
+	bool is_3d = view_mode == GRAIN_VIEW_3D;
+	if (is_3d) {
+		update_camera();
+		push_camera();
+		draw_grid();
+		// Flush the grid now so the particles draw over it
+		cf_render_to(cf_app_get_canvas(), false);
+	}
+
 	cf_apply_canvas(cf_app_get_canvas(), false);
 	grain_begin_render(grain);
 	grain_render(particle_system);
@@ -2222,6 +2364,10 @@ update(void) {
 	debug_draw_end();
 
 	cf_app_draw_onto_screen(false);
+
+	if (is_3d) {
+		pop_camera();
+	}
 }
 
 // }}}

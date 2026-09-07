@@ -9,17 +9,32 @@
  * The vocabulary is editor-assigned; the library treats decorators as opaque.
  * Reference arguments are bare identifiers naming a sibling param in the same
  * Params block; a reference that does not resolve disables the gizmo silently.
+ * An anchor (`at`) may name a vec2 or a vec3 param; a vec2 sits on the XY
+ * plane at z = 0, which is how the 3D view shows 2D gizmos.
  *
- * @position            (vec2)  crosshair + draggable handle, writes back
- * @radius(at)          (float) circle around the anchor
- * @angle(at, length)   (float) arrow ray from the anchor, angle in radians
+ * @position            (vec2/vec3) crosshair + handle; a vec2 is draggable
+ *                                  in the 2D view, writes back
+ * @radius(at)          (float) circle around the anchor; a sphere in 3D
+ * @angle(at, length)   (float) arrow ray from the anchor, angle in radians,
+ *                              in the XY plane
  * @arc(at, to, inner, outer)
- *                      (float) wedge between this angle and `to`'s value;
- *                              inner/outer radii make it an annular sector
+ *                      (float) wedge between this angle and `to`'s value in
+ *                              the XY plane; inner/outer radii make it an
+ *                              annular sector
  * @vector(at, scale, angle)
- *                      (vec2)  arrow of the value scaled by `scale`, or
+ *                      (vec2/vec3) arrow of the value scaled by `scale`, or
  *                      (float) magnitude along `angle` radians
- * @extent(at)          (vec2)  rectangle of that size centered on the anchor
+ * @extent(at)          (vec2/vec3) rectangle or box of that size centered
+ *                                  on the anchor
+ * @direction(at, length)
+ *                      (vec3)  arrow of the normalized value, `length` long
+ * @cone(at, axis, inner, outer)
+ *                      (float) cone of this half-angle around the vec3 param
+ *                              `axis` names; inner/outer radii make it a
+ *                              spherical sector, the 3D form of @arc
+ *
+ * In the 3D view, arrows cast a dashed shadow on the y = 0 ground plane with
+ * a drop line from the tip, the depth cue a single viewpoint lacks.
  */
 
 /**
@@ -39,7 +54,7 @@ debug_draw_find_sibling_param(
 
 //! Reset the frame's gizmo list; call once per frame before any module UI
 void
-debug_draw_begin(void);
+debug_draw_begin(grain_view_t view);
 
 /**
  * Register the gizmos of one param; call right after its ImGui widget.
@@ -58,7 +73,11 @@ debug_draw_param(
 	bool highlight
 );
 
-//! Draw every registered gizmo; call after grain_end_render
+/**
+ * Draw every registered gizmo; call after grain_end_render.
+ *
+ * In the 3D view the draw3d projection and view stacks must still be pushed.
+ */
 void
 debug_draw_end(void);
 
