@@ -455,11 +455,10 @@ typedef struct {
  * effect in system-local space, which is what blueprint bounds store. Call
  * between grain_end_update and the next grain_begin_update.
  *
- * The GPU copy is asynchronous: poll @ref grain_probe_ready once per frame
- * after presenting. The first probe of an archetype compiles its probe
- * shader; later ones reuse it. Costs one small draw and a readback of
- * pool_size texels, intended for editors and offline tools, not per-frame
- * game use.
+ * The first probe of an archetype compiles its probe shader; later ones
+ * reuse it. Costs one small draw and a readback of a few pool_size rows of
+ * 8-bit texels, intended for editors and offline tools, not per-frame game
+ * use.
  *
  * Baked archetypes (grain_baked.h) carry no shader source and cannot be
  * probed.
@@ -611,6 +610,19 @@ grain_blueprint_bounds(grain_blueprint_t* blueprint, grain_bounds_t* out);
 //! Store bounds to be saved with the blueprint; an empty bounds clears them
 void
 grain_blueprint_set_bounds(grain_blueprint_t* blueprint, grain_bounds_t bounds);
+
+/**
+ * Overwrite the saved pool config (sizing tools write measured values back).
+ *
+ * `archetype` is ignored: a blueprint's archetype is whatever it defined.
+ * Only affects what grain_save_blueprint writes and what
+ * grain_blueprint_pool_opts returns; pools already created are untouched.
+ */
+void
+grain_blueprint_set_pool_opts(grain_blueprint_t* blueprint, grain_pool_opts_t opts);
+
+void
+grain_blueprint_set_emission_rate(grain_blueprint_t* blueprint, float emission_rate);
 
 /**
  * Write the saved param values and emission rate into a system.

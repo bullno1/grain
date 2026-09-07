@@ -1,18 +1,29 @@
-// The probe pass: the render stage re-run with identity transforms into a
-// small canvas, one texel per (slot, corner), then read back. See
+// The probe pass: the render stage re-run with identity view transforms into
+// a small 8-bit canvas, one column of texels per slot, then read back. See
 // probe.vert.glsl for the GPU side and grain.h for the contract.
 #include "internal.h"
 #include <float.h>
 #include <math.h>
+#include <string.h>
 
-// Rows of the probe canvas: one per quad corner. Mirrors GRAIN_PROBE_ROWS in
-// probe.vert.glsl.
-#define GRAIN_PROBE_ROWS 4
-// RGBA32F
-#define GRAIN_PROBE_TEXEL_SIZE (sizeof(float) * 4)
+// Layout of a slot's column in the probe canvas; mirrors probe.vert.glsl.
+// Four corners of x, y, z and age, one float per 8-bit RGBA texel, then a
+// marker row. The canvas is 8-bit because that is the one format every
+// backend's readback handles (the GLES path reads RGBA8 whatever the target).
+#define GRAIN_PROBE_ROWS 17
+#define GRAIN_PROBE_CORNERS 4
+#define GRAIN_PROBE_MARKER_ROW 16
+#define GRAIN_PROBE_MARKER 0x47524149u
+// RGBA8
+#define GRAIN_PROBE_TEXEL_SIZE 4
 
 struct grain_probe_s {
+	// The draw is recorded into the frame's command buffer at capture; the
+	// copy out is a separate submission on the SDL_GPU backends, so it is
+	// issued on the first poll, once the caller has presented that frame
+	CF_Canvas canvas;
 	CF_Readback readback;
+	bool readback_started;
 	int pool_size;
 
 	// Filled at capture; the aggregates and slots on first grain_probe_result
@@ -72,7 +83,7 @@ grain_make_pool_probe(grain_pool_t* pool) {
 	canvas_params.targets[0].filter = CF_FILTER_NEAREST;
 	canvas_params.targets[0].wrap_u = CF_WRAP_MODE_CLAMP_TO_EDGE;
 	canvas_params.targets[0].wrap_v = CF_WRAP_MODE_CLAMP_TO_EDGE;
-	canvas_params.targets[0].pixel_format = CF_PIXEL_FORMAT_R32G32B32A32_FLOAT;
+	canvas_params.targets[0].pixel_format = CF_PIXEL_FORMAT_R8G8B8A8_UNORM;
 	pool->probe_canvas = cf_make_canvas(canvas_params);
 
 	// One region index. The GLES path reads storage buffers as uvec4 texels,
@@ -151,15 +162,9 @@ grain_probe_system(grain_system_t* system) {
 	cf_apply_scissor(0, 0, pool->pool_size, GRAIN_PROBE_ROWS);
 	cf_draw_elements_range(0, 3, pool->pool_size * GRAIN_PROBE_ROWS);
 
-	CF_Readback readback = cf_canvas_readback(pool->probe_canvas);
-	if (readback.id == 0) {
-		grain_set_last_error(grain, "Canvas readback failed");
-		return NULL;
-	}
-
 	grain_probe_t* probe = cf_alloc(sizeof(grain_probe_t));
 	*probe = (grain_probe_t){
-		.readback = readback,
+		.canvas = pool->probe_canvas,
 		.pool_size = pool->pool_size,
 	};
 
@@ -174,24 +179,58 @@ grain_probe_system(grain_system_t* system) {
 	return probe;
 }
 
+// Issues the copy out on the first poll. The caller polls after presenting
+// the frame that drew the probe, so on the SDL_GPU backends, where the copy is
+// its own submission, it lands behind the draw; the GLES path copies
+// synchronously either way.
+static void
+grain_probe_start_readback(grain_probe_t* probe) {
+	if (probe->readback_started) { return; }
+	probe->readback_started = true;
+	probe->readback = cf_canvas_readback(probe->canvas);
+	if (probe->readback.id == 0) { probe->failed = true; }
+}
+
 bool
 grain_probe_ready(grain_probe_t* probe) {
+	grain_probe_start_readback(probe);
 	// A failed resolve is final: report ready so callers stop polling and see
 	// the NULL result
 	return probe->resolved || probe->failed || cf_readback_ready(probe->readback);
+}
+
+static uint32_t
+grain_probe_texel_bits(const uint8_t* pixels, int pool_size, int lid, int row) {
+	const uint8_t* texel = pixels + (row * pool_size + lid) * GRAIN_PROBE_TEXEL_SIZE;
+	return (uint32_t)texel[0]
+		| ((uint32_t)texel[1] << 8)
+		| ((uint32_t)texel[2] << 16)
+		| ((uint32_t)texel[3] << 24);
 }
 
 static bool
 grain_probe_resolve(grain_probe_t* probe) {
 	int pool_size = probe->pool_size;
 	int num_texels = pool_size * GRAIN_PROBE_ROWS;
-	int expected_size = (int)(num_texels * GRAIN_PROBE_TEXEL_SIZE);
+	int expected_size = num_texels * GRAIN_PROBE_TEXEL_SIZE;
 	if (cf_readback_size(probe->readback) != expected_size) {
 		return false;
 	}
 
-	float* pixels = cf_alloc(expected_size);
+	uint8_t* pixels = cf_alloc(expected_size);
 	if (cf_readback_data(probe->readback, pixels, expected_size) != expected_size) {
+		cf_free(pixels);
+		return false;
+	}
+
+	// Backends disagree on whether row 0 is the top or the bottom of a canvas;
+	// the marker row says which way this one came back
+	bool flipped;
+	if (grain_probe_texel_bits(pixels, pool_size, 0, GRAIN_PROBE_MARKER_ROW) == GRAIN_PROBE_MARKER) {
+		flipped = false;
+	} else if (grain_probe_texel_bits(pixels, pool_size, 0, 0) == GRAIN_PROBE_MARKER) {
+		flipped = true;
+	} else {
 		cf_free(pixels);
 		return false;
 	}
@@ -202,14 +241,18 @@ grain_probe_resolve(grain_probe_t* probe) {
 	result->max_age = 0.f;
 	result->bounds = grain_bounds_empty();
 
-	// Every corner of a slot carries the same age, so which row a corner
-	// landed in (backends disagree on row order) never matters
 	for (int lid = 0; lid < pool_size; ++lid) {
 		grain_probe_slot_t* slot = &slots[lid];
 		*slot = (grain_probe_slot_t){ .bounds = grain_bounds_empty() };
 
-		for (int row = 0; row < GRAIN_PROBE_ROWS; ++row) {
-			const float* texel = pixels + (row * pool_size + lid) * 4;
+		for (int corner = 0; corner < GRAIN_PROBE_CORNERS; ++corner) {
+			float texel[4];
+			for (int component = 0; component < 4; ++component) {
+				int row = corner * 4 + component;
+				if (flipped) { row = GRAIN_PROBE_ROWS - 1 - row; }
+				uint32_t bits = grain_probe_texel_bits(pixels, pool_size, lid, row);
+				memcpy(&texel[component], &bits, sizeof(float));
+			}
 			if (texel[3] < 0.f) { continue; }
 
 			slot->live = true;
@@ -232,6 +275,7 @@ grain_probe_resolve(grain_probe_t* probe) {
 
 const grain_probe_result_t*
 grain_probe_result(grain_probe_t* probe) {
+	grain_probe_start_readback(probe);
 	if (probe->failed) { return NULL; }
 	if (!probe->resolved) {
 		if (!cf_readback_ready(probe->readback)) { return NULL; }
@@ -248,7 +292,7 @@ void
 grain_destroy_probe(grain_probe_t* probe) {
 	if (probe == NULL) { return; }
 
-	cf_destroy_readback(probe->readback);
+	if (probe->readback.id != 0) { cf_destroy_readback(probe->readback); }
 	cf_free(probe->slots);
 	cf_free(probe);
 }

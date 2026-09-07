@@ -1000,6 +1000,19 @@ grain_blueprint_pool_opts(grain_blueprint_t* blueprint) {
 	};
 }
 
+void
+grain_blueprint_set_pool_opts(grain_blueprint_t* blueprint, grain_pool_opts_t opts) {
+	blueprint->max_systems = opts.max_systems;
+	blueprint->max_emission_rate = opts.max_emission_rate;
+	blueprint->lifetime_budget = opts.lifetime_budget;
+	blueprint->max_burst_size = opts.max_burst_size;
+}
+
+void
+grain_blueprint_set_emission_rate(grain_blueprint_t* blueprint, float emission_rate) {
+	blueprint->emission_rate = emission_rate;
+}
+
 bool
 grain_blueprint_bounds(grain_blueprint_t* blueprint, grain_bounds_t* out) {
 	if (!blueprint->has_bounds) { return false; }
