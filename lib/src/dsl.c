@@ -356,6 +356,10 @@ grain_dsl_parse_module(
 			.content = (const char*)XINCBIN_GET(grain_sdf).data,
 		},
 		{
+			.name = "grain/transform.glsl",
+			.content = (const char*)XINCBIN_GET(grain_transform).data,
+		},
+		{
 			.name = "grain/internal.glsl",
 			.content = (const char*)XINCBIN_GET(grain_internal).data,
 		},
@@ -501,7 +505,7 @@ grain_dsl_compile_archetype(
 	const char* render_source,
 	grain_dsl_archetype_shaders_t* out
 ) {
-	int num_vfs_entries = spec.num_emitters + spec.num_affectors + 9;
+	int num_vfs_entries = spec.num_emitters + spec.num_affectors + 10;
 	int vfs_index = 0;
 	grain_vfs_entry_t* vfs_entries = cf_arena_alloc(&grain->arena, num_vfs_entries * sizeof(grain_vfs_entry_t));
 	for (int i = 0; i < spec.num_emitters; ++i) {
@@ -525,6 +529,10 @@ grain_dsl_compile_archetype(
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
 		.name = "grain/sdf.glsl",
 		.content = (const char*)XINCBIN_GET(grain_sdf).data,
+	};
+	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
+		.name = "grain/transform.glsl",
+		.content = (const char*)XINCBIN_GET(grain_transform).data,
 	};
 	vfs_entries[vfs_index++] = (grain_vfs_entry_t){
 		.name = "grain/internal.glsl",

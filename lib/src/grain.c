@@ -922,6 +922,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		"layout(set = GRAIN_UNIFORM_SET, binding = 0) uniform uniform_block {\n"
 		"\tint grain_pool_size;\n"
 		"\tmat4 grain_transform;\n"
+		"\tmat4 grain_transform3d;\n"
+		"\tmat4 grain_projection;\n"
 	);
 	if (num_user_samplers > 0) {
 		sfmt_append(archetype_attrs, "\tvec4 grain_sampler_uv[%d];\n", num_user_samplers);
@@ -1163,6 +1165,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	// Render shader
 	sappend(archetype_render, "#include \"grain/api.glsl\"\n");
 	sappend(archetype_render, "#include \"archetype/attrs.glsl\"\n");
+	// Builtins over the uniform block, so they must follow attrs.glsl
+	sappend(archetype_render, "#include \"grain/transform.glsl\"\n");
 
 	// ModuleParams
 	sappend(archetype_render, "\n");
@@ -2138,13 +2142,13 @@ grain_begin_render(grain_t* grain) {
 	grain->render_list = NULL;
 }
 
-static CF_M3x2
-grain_current_transform(void) {
-	int w, h;
-	cf_app_get_size(&w, &h);
-	CF_M3x2 projection = cf_ortho_2d(0.f, 0.f, (float)w, (float)h);
-	return cf_mul_m32(projection, cf_draw_peek());
-}
+// The transforms handed to render shaders, mirroring CF's split between its
+// 2D and 3D draw APIs (see glsl/transform.glsl for the shader-side contract)
+typedef struct {
+	float transform[16];   // 2D: canvas projection * draw transform stack
+	CF_M4x4 transform3d;   // 3D: view * transform stacks, world -> view
+	CF_M4x4 projection;    // 3D: projection stack, view -> clip
+} grain_transforms_t;
 
 static void
 grain_transform_to_mat4(CF_M3x2 transform, float* out) {
@@ -2152,6 +2156,19 @@ grain_transform_to_mat4(CF_M3x2 transform, float* out) {
 	out[4]  = transform.m.y.x; out[5]  = transform.m.y.y; out[6]  = 0.f; out[7]  = 0.f;
 	out[8]  = 0.f;             out[9]  = 0.f;             out[10] = 1.f; out[11] = 0.f;
 	out[12] = transform.p.x;   out[13] = transform.p.y;   out[14] = 0.f; out[15] = 1.f;
+}
+
+static grain_transforms_t
+grain_current_transforms(void) {
+	int w, h;
+	cf_app_get_size(&w, &h);
+	CF_M3x2 projection = cf_ortho_2d(0.f, 0.f, (float)w, (float)h);
+
+	grain_transforms_t transforms;
+	grain_transform_to_mat4(cf_mul_m32(projection, cf_draw_peek()), transforms.transform);
+	transforms.transform3d = cf_mul_m4(cf_draw3d_peek_view(), cf_draw3d_peek_transform());
+	transforms.projection = cf_draw3d_peek_projection();
+	return transforms;
 }
 
 void
@@ -2171,7 +2188,7 @@ grain_render(grain_system_t* system) {
 }
 
 static void
-grain_render_pool(grain_t* grain, grain_pool_t* pool, CF_M3x2 transform) {
+grain_render_pool(grain_t* grain, grain_pool_t* pool, const grain_transforms_t* transforms) {
 	grain_reconcile_pool(pool);
 
 	int system_hwm = grain_find_system_hwm(pool);
@@ -2187,10 +2204,13 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool, CF_M3x2 transform) {
 		cf_material_set_texture_fs(pool->material, name, cf_canvas_get_target2(src_canvas, i));
 	}
 
-	float transform_mat4[16];
-	grain_transform_to_mat4(transform, transform_mat4);
-	cf_material_set_uniform_vs(pool->material, "grain_transform", transform_mat4, CF_UNIFORM_TYPE_MAT4, 1);
-	cf_material_set_uniform_fs(pool->material, "grain_transform", transform_mat4, CF_UNIFORM_TYPE_MAT4, 1);
+	// CF_M4x4 is column-major, which is what CF_UNIFORM_TYPE_MAT4 expects
+	cf_material_set_uniform_vs(pool->material, "grain_transform", (void*)transforms->transform, CF_UNIFORM_TYPE_MAT4, 1);
+	cf_material_set_uniform_fs(pool->material, "grain_transform", (void*)transforms->transform, CF_UNIFORM_TYPE_MAT4, 1);
+	cf_material_set_uniform_vs(pool->material, "grain_transform3d", (void*)transforms->transform3d.elements, CF_UNIFORM_TYPE_MAT4, 1);
+	cf_material_set_uniform_fs(pool->material, "grain_transform3d", (void*)transforms->transform3d.elements, CF_UNIFORM_TYPE_MAT4, 1);
+	cf_material_set_uniform_vs(pool->material, "grain_projection", (void*)transforms->projection.elements, CF_UNIFORM_TYPE_MAT4, 1);
+	cf_material_set_uniform_fs(pool->material, "grain_projection", (void*)transforms->projection.elements, CF_UNIFORM_TYPE_MAT4, 1);
 
 	cf_material_set_render_state(pool->material, pool->render_state);
 	cf_apply_shader(pool->opts.archetype->shaders.render_shader, pool->material);
@@ -2208,13 +2228,13 @@ grain_render_pool(grain_t* grain, grain_pool_t* pool, CF_M3x2 transform) {
 
 void
 grain_end_render(grain_t* grain) {
-	CF_M3x2 transform = grain_current_transform();
+	grain_transforms_t transforms = grain_current_transforms();
 
 	for (
 		grain_pool_t* itr = grain->render_list;
 		itr != NULL;
 	) {
-		grain_render_pool(grain, itr, transform);
+		grain_render_pool(grain, itr, &transforms);
 
 		grain_pool_t* next = itr->render_next;
 		itr->render_next = NULL;

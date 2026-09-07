@@ -411,3 +411,97 @@ BTEST(archetype, texture_smooth_builtin) {
 	);
 	BTEST_ASSERT_EX(archetype != NULL, "%s", grain_get_last_error(test_grain()));
 }
+
+// A 3D archetype: vec3 attributes through the vec3 helper overloads, and a
+// billboarded renderer over grain_transform3d/grain_projection. Both the
+// inspect stub (module definition) and the composed shaders must resolve the
+// transform builtins, for the desktop and GLES variants alike.
+BTEST(archetype, composes_3d) {
+	grain_emitter_t* emitter = grain_define_emitter(
+		test_grain(),
+		"Emitter(Cone)\n"
+		"Requires(\n"
+		"	vec3 position;\n"
+		"	vec3 velocity;\n"
+		"	float lifetime;\n"
+		")\n"
+		"Params(\n"
+		"	vec3 origin;\n"
+		"	vec3 axis;\n"
+		"	float spread;\n"
+		"	float speed;\n"
+		")\n"
+		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	particle.position = params.origin;\n"
+		"	vec3 dir = unit_vec(rand_range(0.0, TAU), rand_range(0.0, params.spread));\n"
+		"	particle.velocity = rotate(dir, normalize(params.axis), rand() * TAU) * params.speed;\n"
+		"	particle.lifetime = 2.0;\n"
+		"}\n"
+	);
+	BTEST_ASSERT_EX(emitter != NULL, "%s", grain_get_last_error(test_grain()));
+
+	grain_affector_t* affector = grain_define_affector(
+		test_grain(),
+		"Affector(Floor)\n"
+		"Requires(\n"
+		"	vec3 position;\n"
+		"	vec3 velocity;\n"
+		"	float lifetime;\n"
+		")\n"
+		"Params(\n"
+		"	float height;\n"
+		"	float bounciness;\n"
+		")\n"
+		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	if (particle.position.z < params.height) {\n"
+		"		particle.velocity = deflect(particle.velocity, vec3(0.0, 0.0, 1.0), params.bounciness);\n"
+		"	}\n"
+		"	particle.position += particle.velocity * ctx.dt;\n"
+		"	particle.lifetime -= ctx.dt;\n"
+		"}\n"
+	);
+	BTEST_ASSERT_EX(affector != NULL, "%s", grain_get_last_error(test_grain()));
+
+	grain_renderer_t* renderer = grain_define_renderer(
+		test_grain(),
+		"Renderer(Billboard)\n"
+		"Requires(\n"
+		"	vec3 position;\n"
+		"	float lifetime;\n"
+		")\n"
+		"Params(\n"
+		"	vec2 size;\n"
+		"	uint flat;\n"
+		")\n"
+		"Varying(0) vec2 v_uv;\n"
+		"#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX\n"
+		"void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	if (particle.lifetime <= 0.0) { cull(); return; }\n"
+		"	v_uv = uv_quad();\n"
+		"	if (params.flat != 0u) {\n"
+		"		vec3 corner = particle.position + vec3(quad() * params.size, 0.0);\n"
+		"		gl_Position = grain_projection * grain_transform3d * vec4(corner, 1.0);\n"
+		"	} else {\n"
+		"		gl_Position = billboard(particle.position, quad() * params.size);\n"
+		"	}\n"
+		"}\n"
+		"#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT\n"
+		"void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	grain_Color = premultiply(vec4(v_uv, 1.0, clamp(particle.lifetime, 0.0, 1.0)));\n"
+		"}\n"
+		"#endif\n"
+	);
+	BTEST_ASSERT_EX(renderer != NULL, "%s", grain_get_last_error(test_grain()));
+
+	grain_archetype_t* archetype = grain_define_archetype(
+		test_grain(), "Test",
+		(grain_archetype_spec_t){
+			.emitters = &emitter,
+			.num_emitters = 1,
+			.affectors = &affector,
+			.num_affectors = 1,
+			.renderer = renderer,
+		}
+	);
+	BTEST_ASSERT_EX(archetype != NULL, "%s", grain_get_last_error(test_grain()));
+}

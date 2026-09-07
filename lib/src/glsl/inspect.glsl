@@ -7,7 +7,11 @@
 #define Params(X) struct ModuleParams { X float grain_ignore; }; layout(set = 0, binding = 2) uniform grain_Inspect_Params {X float grain_ignore;} Params;
 #define Samplers(X)
 
+// Stand-ins for the archetype uniform block, see transform.glsl
 mat4 grain_transform;
+mat4 grain_transform3d;
+mat4 grain_projection;
+#include "grain/transform.glsl"
 
 // Generated declarations for the module's Samplers block
 #include "grain/samplers.glsl"

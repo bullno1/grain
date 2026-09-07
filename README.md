@@ -82,6 +82,16 @@ Modules are classified into several kinds:
   However, instead of taking input from a geometry buffer, the input is a particle's various attributes.
   Just like emitters and affector, its entry point is not `main`, but `process` with the above signature.
 
+  The vertex stage gets the current transforms as uniforms, split the same way Cute Framework splits its 2D and 3D draw APIs:
+
+  * `grain_transform`: 2D, the `cf_draw` transform stack composed with the canvas projection. World to clip in one matrix:
+    `gl_Position = grain_transform * vec4(particle.position + quad() * params.size, 0.0, 1.0);`
+  * `grain_transform3d`: 3D, the `cf_draw3d` view and transform stacks composed. World to view space.
+  * `grain_projection`: 3D, the `cf_draw3d` projection stack. View to clip.
+
+  The 3D pair stays split so a renderer can offset in view space, which is what `billboard(position, offset)` does:
+  `gl_Position = billboard(particle.position, quad() * params.size);` draws a camera-facing quad.
+
   A particle system can only have a single renderer.
 
 By combining different emitters, affectors and renderers, complex effects can be created.

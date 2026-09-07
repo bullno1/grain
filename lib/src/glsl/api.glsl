@@ -67,10 +67,25 @@ vec2 unit_vec(float angle) {
 	return vec2(cos(angle), sin(angle));
 }
 
+// 3D overload extending the 2D form: azimuth turns in the XY plane exactly
+// like unit_vec(angle), elevation lifts out of it toward +z, so
+// unit_vec(a, 0.0) == vec3(unit_vec(a), 0.0)
+vec3 unit_vec(float azimuth, float elevation) {
+	return vec3(unit_vec(azimuth) * cos(elevation), sin(elevation));
+}
+
 vec2 rotate(vec2 v, float angle) {
 	float c = cos(angle);
 	float s = sin(angle);
 	return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
+}
+
+// 3D overload: rotates v around a unit axis (Rodrigues). Around +z it matches
+// the 2D form: rotate(vec3(v, 0.0), vec3(0.0, 0.0, 1.0), a) == vec3(rotate(v, a), 0.0)
+vec3 rotate(vec3 v, vec3 axis, float angle) {
+	float c = cos(angle);
+	float s = sin(angle);
+	return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
 }
 
 // Converts a straight-alpha color for premultiplied-alpha blending
@@ -80,6 +95,11 @@ vec4 premultiply(vec4 color) {
 
 // Bounces velocity off a surface with normal n, only when moving into it
 vec2 deflect(vec2 velocity, vec2 n, float bounciness) {
+	float vn = dot(velocity, n);
+	return vn < 0.0 ? velocity - (1.0 + bounciness) * vn * n : velocity;
+}
+
+vec3 deflect(vec3 velocity, vec3 n, float bounciness) {
 	float vn = dot(velocity, n);
 	return vn < 0.0 ? velocity - (1.0 + bounciness) * vn * n : velocity;
 }
