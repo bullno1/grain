@@ -9,14 +9,15 @@ Params(
 	@position
 	vec2 position;
 
-	@range(min=0, step=0.1)
+	@range(min=0, max=max_speed, step=0.1)
 	float min_speed;
+	@range(min=min_speed, step=0.1)
 	float max_speed;
 
-	@range(step = 0.0174533)
+	@range(max=max_angle, step = 0.0174533)
 	@arc(at=position, to=max_angle, inner=min_speed, outer=max_speed)
 	float min_angle;
-	@range(step = 0.0174533)
+	@range(min=min_angle, step = 0.0174533)
 	float max_angle;
 )
 

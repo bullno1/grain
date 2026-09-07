@@ -22,6 +22,21 @@
  * @extent(at)          (vec2)  rectangle of that size centered on the anchor
  */
 
+/**
+ * Find the param named `name` with type `type` in the same Params block as
+ * `module`. Returns its archetype-wide param index or -1.
+ *
+ * This is the resolution rule for every identifier decorator argument, and is
+ * shared with the param widgets (e.g. `@range(max = other_param)`).
+ */
+int
+debug_draw_find_sibling_param(
+	const grain_archetype_info_t* archetype_info,
+	const grain_module_info_t* module,
+	const char* name,
+	CF_ShaderInfoDataType type
+);
+
 //! Reset the frame's gizmo list; call once per frame before any module UI
 void
 debug_draw_begin(void);

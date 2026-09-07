@@ -827,6 +827,64 @@ show_module_list(CK_MAP(module_meta_t*) module_map, const char* label, int* curr
 	return ImGui_ComboCallback(label, current_item, module_list_name_getter, module_map, map_size(module_map));
 }
 
+/**
+ * Resolve a `@range` bound that is either a number literal or a bare
+ * identifier naming a sibling scalar param of the same type, whose current
+ * value becomes the bound (e.g. `min_angle` clamped by `max_angle`).
+ *
+ * Returns false when the bound is absent or the reference does not resolve,
+ * in which case the field is simply unclamped on that side. *is_ref reports
+ * whether the bound came from a sibling.
+ */
+static bool
+resolve_range_bound(
+	const grain_param_decorator_t* range_decorator,
+	int arg_index,
+	const char* arg_name,
+	const grain_archetype_info_t* archetype_info,
+	const grain_module_info_t* module,
+	const grain_param_info_t* param_info,
+	float* out,
+	bool* is_ref
+) {
+	grain_decorator_arg_t arg;
+	if (!grain_find_decorator_arg(range_decorator, arg_index, arg_name, &arg)) {
+		return false;
+	}
+
+	switch (arg.type) {
+		case GRAIN_DECORATOR_ARG_NUMBER:
+			*out = arg.value.number;
+			return true;
+		case GRAIN_DECORATOR_ARG_IDENT: {
+			int ref = debug_draw_find_sibling_param(
+				archetype_info, module, arg.value.string, param_info->type
+			);
+			if (ref < 0) { return false; }
+			const void* value = grain_get_parameter(particle_system, ref);
+			if (value == NULL) { return false; }
+			switch (param_info->type) {
+				case CF_SHADER_INFO_TYPE_FLOAT:
+					*out = *(const float*)value;
+					break;
+				case CF_SHADER_INFO_TYPE_SINT:
+					*out = (float)*(const int32_t*)value;
+					break;
+				case CF_SHADER_INFO_TYPE_UINT:
+					*out = (float)*(const uint32_t*)value;
+					break;
+				default:
+					// Vector params have no single bound
+					return false;
+			}
+			*is_ref = true;
+			return true;
+		}
+		default:
+			return false;
+	}
+}
+
 static void
 show_module_params(
 	const grain_module_info_t* module,
@@ -842,27 +900,21 @@ show_module_params(
 		float min_val;
 		bool has_max = false;
 		float max_val;
+		bool bound_is_ref = false;
 		float step = 1.f;
 		if (range_decorator) {
 			grain_decorator_arg_t arg;
 			int arg_index = 0;
-			if (
-				grain_find_decorator_arg(range_decorator, arg_index++, "min", &arg)
-				&&
-				arg.type == GRAIN_DECORATOR_ARG_NUMBER
-			) {
-				has_min = true;
-				min_val = arg.value.number;
-			}
-
-			if (
-				grain_find_decorator_arg(range_decorator, arg_index++, "max", &arg)
-				&&
-				arg.type == GRAIN_DECORATOR_ARG_NUMBER
-			) {
-				has_max = true;
-				max_val = arg.value.number;
-			}
+			has_min = resolve_range_bound(
+				range_decorator, arg_index++, "min",
+				archetype_info, module, param_info,
+				&min_val, &bound_is_ref
+			);
+			has_max = resolve_range_bound(
+				range_decorator, arg_index++, "max",
+				archetype_info, module, param_info,
+				&max_val, &bound_is_ref
+			);
 
 			if (
 				grain_find_decorator_arg(range_decorator, arg_index++, "step", &arg)
@@ -969,7 +1021,9 @@ show_module_params(
 			if (has_min) min_ptr = type == ImGuiDataType_Float ? (void*)&min_val : (void*)&(int){ (int)min_val };
 			if (has_max) max_ptr = type == ImGuiDataType_Float ? (void*)&max_val : (void*)&(int){ (int)max_val };
 
-			if (has_min && has_max) {
+			// A bound that tracks a sibling moves as that sibling is edited, which
+			// makes a slider's scale jump around; a drag field just clamps.
+			if (has_min && has_max && !bound_is_ref) {
 				updated = ImGui_SliderScalarNEx(
 					param_info->name,
 					type,

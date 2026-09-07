@@ -12,15 +12,15 @@ Params(
 	@range(min = 0, step = 0.1)
 	float strength;
 
-	@range(min = 0, step = 0.1)
+	@range(min = 0, max = max_range, step = 0.1)
 	float min_range;
-	@range(min = 0, step = 0.1)
+	@range(min = min_range, step = 0.1)
 	float max_range;
 
-	@range(step = 0.0174533)
+	@range(max = max_angle, step = 0.0174533)
 	@arc(at = position, to = max_angle, inner = min_range, outer = max_range)
 	float min_angle;
-	@range(step = 0.0174533)
+	@range(min = min_angle, step = 0.0174533)
 	float max_angle;
 )
 

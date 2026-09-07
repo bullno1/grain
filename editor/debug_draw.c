@@ -53,16 +53,26 @@ typedef struct {
 	const grain_module_info_t* module;
 } resolve_ctx_t;
 
-static int
-find_sibling_param(const resolve_ctx_t* ctx, const char* name, CF_ShaderInfoDataType type) {
-	for (int i = 0; i < ctx->module->num_params; ++i) {
-		int param_index = ctx->module->first_param + i;
-		const grain_param_info_t* param = &ctx->info->params[param_index];
+int
+debug_draw_find_sibling_param(
+	const grain_archetype_info_t* archetype_info,
+	const grain_module_info_t* module,
+	const char* name,
+	CF_ShaderInfoDataType type
+) {
+	for (int i = 0; i < module->num_params; ++i) {
+		int param_index = module->first_param + i;
+		const grain_param_info_t* param = &archetype_info->params[param_index];
 		if (param->type == type && strcmp(param->name, name) == 0) {
 			return param_index;
 		}
 	}
 	return -1;
+}
+
+static int
+find_sibling_param(const resolve_ctx_t* ctx, const char* name, CF_ShaderInfoDataType type) {
+	return debug_draw_find_sibling_param(ctx->info, ctx->module, name, type);
 }
 
 static void
