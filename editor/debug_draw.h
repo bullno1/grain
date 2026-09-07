@@ -91,4 +91,12 @@ debug_draw_param(
 void
 debug_draw_end(void);
 
+/**
+ * Outline a bounds box in the current view: a dashed rectangle of its XY
+ * extent in 2D, a wire box in 3D. Empty bounds draw nothing. Same call
+ * placement as debug_draw_end.
+ */
+void
+debug_draw_bounds(grain_bounds_t bounds, CF_Color color);
+
 #endif

@@ -1143,3 +1143,39 @@ debug_draw_end(void) {
 		cf_draw3d_pop_stroke_pixels();
 	}
 }
+
+void
+debug_draw_bounds(grain_bounds_t bounds, CF_Color color) {
+	if (grain_bounds_is_empty(bounds)) { return; }
+
+	cf_draw_push_color(color);
+	cf_draw3d_push_color(color);
+	if (current_view == GRAIN_VIEW_3D) {
+		cf_draw3d_push_stroke_pixels(true);
+		CF_V3 center = cf_v3(
+			(bounds.min[0] + bounds.max[0]) * 0.5f,
+			(bounds.min[1] + bounds.max[1]) * 0.5f,
+			(bounds.min[2] + bounds.max[2]) * 0.5f
+		);
+		CF_V3 half = cf_v3(
+			(bounds.max[0] - bounds.min[0]) * 0.5f,
+			(bounds.max[1] - bounds.min[1]) * 0.5f,
+			(bounds.max[2] - bounds.min[2]) * 0.5f
+		);
+		cf_draw3d_box_wire(center, half, GIZMO_THICKNESS);
+		cf_draw3d_pop_stroke_pixels();
+	} else {
+		// The XY extent; a flat 2D effect has nothing along z anyway
+		CF_V2 corners[] = {
+			{ bounds.min[0], bounds.min[1] },
+			{ bounds.max[0], bounds.min[1] },
+			{ bounds.max[0], bounds.max[1] },
+			{ bounds.min[0], bounds.max[1] },
+		};
+		cf_draw_push_dash(SHADOW_DASH, SHADOW_DASH, 0.f);
+		cf_draw_polyline(corners, 4, GIZMO_THICKNESS, true);
+		cf_draw_pop_dash();
+	}
+	cf_draw3d_pop_color();
+	cf_draw_pop_color();
+}

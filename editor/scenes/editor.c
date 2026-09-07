@@ -71,6 +71,35 @@ static const orbit_camera_t DEFAULT_CAMERA = {
 SCENE_VAR(grain_pool_opts_t, current_pool_opts)
 SCENE_VAR(grain_pool_opts_t, pending_pool_opts)
 
+// Probe: one capture in flight at a time, its result folded into the stats
+// the System window shows. See grain_probe_system.
+#define STRIP_BINS 256
+
+typedef struct {
+	bool valid;
+	int num_slots;
+	int num_live;
+	float max_age;
+	float emit_cursor;
+	grain_bounds_t bounds;        // of the last capture
+	float strip[STRIP_BINS];      // fraction of live slots per bin of the ring
+} probe_stats_t;
+
+SCENE_VAR(grain_probe_t*, probe)
+SCENE_VAR(bool, probe_error_logged)
+SCENE_VAR(probe_stats_t, probe_stats)
+SCENE_VAR(float, fit_margin)         // fraction added on top of measurements by Fit
+
+// Bounds carried by the blueprint, measured by baking probe captures over a run
+SCENE_VAR(bool, has_bounds)
+SCENE_VAR(grain_bounds_t, bounds)
+SCENE_VAR(bool, show_bounds)
+SCENE_VAR(bool, baking)
+SCENE_VAR(float, bake_elapsed)
+SCENE_VAR(float, bake_duration)
+SCENE_VAR(float, bake_padding)       // fraction of the measured extent added per side
+SCENE_VAR(grain_bounds_t, bake_acc)
+
 // }}}
 
 // Grain {{{
@@ -786,6 +815,306 @@ bco_static(pick_texture, const char* binding_key) {
 
 // The new pool is created before the old one is destroyed so that a rejected
 // configuration (grain_create_pool validates it) leaves the current pool running.
+// Probe {{{
+
+//! Drop the capture in flight and forget its stats; before the pool goes away
+static void
+reset_probe(void) {
+	if (probe != NULL) {
+		grain_destroy_probe(probe);
+		probe = NULL;
+	}
+	probe_stats = (probe_stats_t){ 0 };
+	probe_error_logged = false;
+}
+
+static void
+cancel_bake(void) {
+	baking = false;
+	bake_elapsed = 0.f;
+}
+
+static grain_bounds_t
+pad_bounds(grain_bounds_t b, float fraction) {
+	if (grain_bounds_is_empty(b)) { return b; }
+	for (int i = 0; i < 3; ++i) {
+		float pad = (b.max[i] - b.min[i]) * fraction;
+		b.min[i] -= pad;
+		b.max[i] += pad;
+	}
+	return b;
+}
+
+static void
+fold_probe_result(const grain_probe_result_t* result) {
+	probe_stats_t stats = {
+		.valid = true,
+		.num_slots = result->num_slots,
+		.num_live = result->num_live,
+		.max_age = result->max_age,
+		.emit_cursor = result->emit_cursor,
+		.bounds = result->bounds,
+	};
+
+	// Bin the ring for the strip: bins never straddle less than one slot
+	int counts[STRIP_BINS] = { 0 };
+	int totals[STRIP_BINS] = { 0 };
+	for (int lid = 0; lid < result->num_slots; ++lid) {
+		int bin = (int)((int64_t)lid * STRIP_BINS / result->num_slots);
+		totals[bin] += 1;
+		counts[bin] += result->slots[lid].live ? 1 : 0;
+	}
+	for (int bin = 0; bin < STRIP_BINS; ++bin) {
+		stats.strip[bin] = totals[bin] > 0 ? (float)counts[bin] / (float)totals[bin] : -1.f;
+	}
+	probe_stats = stats;
+
+	if (baking) {
+		grain_bounds_union(&bake_acc, result->bounds);
+	}
+}
+
+//! Once per frame after grain_end_update: collect the capture in flight or start one
+static void
+step_probe(void) {
+	if (probe != NULL) {
+		if (!grain_probe_ready(probe)) { return; }
+
+		const grain_probe_result_t* result = grain_probe_result(probe);
+		if (result != NULL) {
+			fold_probe_result(result);
+		} else if (!probe_error_logged) {
+			BLOG_ERROR("Probe readback failed");
+			probe_error_logged = true;
+		}
+		grain_destroy_probe(probe);
+		probe = NULL;
+		return;
+	}
+
+	probe = grain_probe_system(particle_system);
+	if (probe == NULL && !probe_error_logged) {
+		BLOG_ERROR("Could not probe the system: %s", grain_get_last_error(grain));
+		probe_error_logged = true;
+	}
+
+	if (baking) {
+		bake_elapsed += CF_DELTA_TIME;
+		if (bake_elapsed >= bake_duration) {
+			grain_bounds_t baked = pad_bounds(bake_acc, bake_padding);
+			has_bounds = !grain_bounds_is_empty(baked);
+			bounds = has_bounds ? baked : grain_bounds_empty();
+			unsaved_changes = true;
+			cancel_bake();
+			if (has_bounds) {
+				BLOG_INFO(
+					"Baked bounds: [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
+					bounds.min[0], bounds.min[1], bounds.min[2],
+					bounds.max[0], bounds.max[1], bounds.max[2]
+				);
+			} else {
+				BLOG_WARN("Bake saw no live particles; bounds left unset");
+			}
+		}
+	}
+}
+
+//! Rate/lifetime/occupancy bar with the histogram color graded by waste
+static void
+show_ratio_bar(const char* label, float ratio, const char* overlay, const char* tooltip) {
+	ImVec4 color =
+		ratio >= 0.5f ? (ImVec4){ 0.35f, 0.8f, 0.4f, 1.f }
+		: ratio >= 0.1f ? (ImVec4){ 0.9f, 0.75f, 0.2f, 1.f }
+		: (ImVec4){ 0.9f, 0.35f, 0.3f, 1.f };
+	ImGui_PushStyleColorImVec4(ImGuiCol_PlotHistogram, color);
+	ImGui_ProgressBar(ratio, (ImVec2){ ImGui_CalcItemWidth(), 0.f }, overlay);
+	ImGui_PopStyleColor();
+	if (ImGui_IsItemHovered(0)) { ImGui_SetTooltip("%s", tooltip); }
+	ImGui_SameLine();
+	ImGui_TextUnformatted(label);
+}
+
+//! The slot ring: one column per bin, lit by the fraction of live slots, with
+//! the emission cursor marked. Waste is the dark part; a cursor sweeping into
+//! lit slots means live particles are being recycled.
+static void
+show_slot_strip(void) {
+	ImDrawList* draw_list = ImGui_GetWindowDrawList();
+	ImVec2 pos = ImGui_GetCursorScreenPos();
+	ImVec2 size = { ImGui_CalcItemWidth(), ImGui_GetFrameHeight() };
+	ImVec2 end = { pos.x + size.x, pos.y + size.y };
+	ImGui_InvisibleButton("##slots", size, 0);
+
+	ImDrawList_AddRectFilled(draw_list, pos, end, ImGui_GetColorU32(ImGuiCol_FrameBg));
+	if (probe_stats.valid) {
+		ImVec4 live = ImGui_GetStyle()->Colors[ImGuiCol_PlotHistogram];
+		for (int bin = 0; bin < STRIP_BINS; ++bin) {
+			float fraction = probe_stats.strip[bin];
+			if (fraction <= 0.f) { continue; }
+			ImVec4 color = { live.x, live.y, live.z, live.w * (0.25f + 0.75f * fraction) };
+			ImDrawList_AddRectFilled(
+				draw_list,
+				(ImVec2){ pos.x + size.x * (float)bin / STRIP_BINS, pos.y },
+				(ImVec2){ pos.x + size.x * (float)(bin + 1) / STRIP_BINS, end.y },
+				ImGui_ColorConvertFloat4ToU32(color)
+			);
+		}
+		float cursor_x = pos.x + size.x * probe_stats.emit_cursor / (float)probe_stats.num_slots;
+		ImDrawList_AddLineEx(
+			draw_list,
+			(ImVec2){ cursor_x, pos.y }, (ImVec2){ cursor_x, end.y },
+			ImGui_ColorConvertFloat4ToU32((ImVec4){ 1.f, 0.6f, 0.1f, 1.f }), 2.f
+		);
+	}
+	ImDrawList_AddRect(draw_list, pos, end, ImGui_GetColorU32(ImGuiCol_Border));
+
+	if (ImGui_IsItemHovered(0)) {
+		if (probe_stats.valid) {
+			ImGui_SetTooltip(
+				"%d of %d slots live; the marker is where the next particle is born",
+				probe_stats.num_live, probe_stats.num_slots
+			);
+		} else {
+			ImGui_SetTooltip("Waiting for the first probe");
+		}
+	}
+	ImGui_SameLine();
+	ImGui_TextUnformatted("Slots");
+}
+
+//! Measured pool usage, and Fit to size the pending pool options from it
+static void
+show_occupancy(void) {
+	show_slot_strip();
+
+	char overlay[64];
+	float rate_ratio = current_pool_opts.max_emission_rate > 0.f
+		? emission_rate / current_pool_opts.max_emission_rate : 0.f;
+	snprintf(overlay, sizeof(overlay), "%.1f / %.1f per s", emission_rate, current_pool_opts.max_emission_rate);
+	show_ratio_bar("Rate", rate_ratio, overlay, "Emission rate against the pool's max emission rate");
+
+	if (!probe_stats.valid) {
+		ImGui_TextDisabledUnformatted("Probing...");
+		return;
+	}
+
+	float lifetime_ratio = current_pool_opts.lifetime_budget > 0.f
+		? probe_stats.max_age / current_pool_opts.lifetime_budget : 0.f;
+	snprintf(overlay, sizeof(overlay), "%.2fs / %.1fs", probe_stats.max_age, current_pool_opts.lifetime_budget);
+	show_ratio_bar(
+		"Lifetime", lifetime_ratio, overlay,
+		"Age of the oldest particle the renderer still draws, against the lifetime budget"
+	);
+
+	float occupancy = probe_stats.num_slots > 0
+		? (float)probe_stats.num_live / (float)probe_stats.num_slots : 0.f;
+	snprintf(
+		overlay, sizeof(overlay), "%d / %d (%.1f%%)",
+		probe_stats.num_live, probe_stats.num_slots, occupancy * 100.f
+	);
+	show_ratio_bar(
+		"Occupancy", occupancy, overlay,
+		"Live slots against pool capacity, burst headroom included"
+	);
+
+	// A slot is revisited every pool_size / rate seconds; a particle still
+	// drawn at that age gets overwritten
+	if (emission_rate > 0.f) {
+		float revisit = (float)probe_stats.num_slots / emission_rate;
+		if (probe_stats.max_age >= revisit * 0.95f) {
+			ImGui_TextColored(
+				(ImVec4){ 1.f, 0.4f, 0.3f, 1.f },
+				"Live particles are being recycled: raise the lifetime budget"
+			);
+		}
+	}
+	if (probe_stats.max_age > current_pool_opts.lifetime_budget) {
+		ImGui_TextColored(
+			(ImVec4){ 1.f, 0.4f, 0.3f, 1.f },
+			"Particles outlive the lifetime budget"
+		);
+	}
+
+	float margin_percent = fit_margin * 100.f;
+	if (ImGui_SliderFloatEx("Fit margin", &margin_percent, 0.f, 100.f, "%.0f%%", 0)) {
+		fit_margin = margin_percent / 100.f;
+	}
+	if (ImGui_IsItemHovered(0)) {
+		ImGui_SetTooltip("Headroom Fit adds on top of the measured rate and lifetime");
+	}
+	if (ImGui_Button("Fit")) {
+		float rate = emission_rate > 1.f ? emission_rate : 1.f;
+		float lifetime = probe_stats.max_age > 0.1f ? probe_stats.max_age : 0.1f;
+		pending_pool_opts.max_emission_rate = ceilf(rate * (1.f + fit_margin));
+		pending_pool_opts.lifetime_budget = ceilf(lifetime * (1.f + fit_margin) * 10.f) / 10.f;
+	}
+	if (ImGui_IsItemHovered(0)) {
+		ImGui_SetTooltip("Set the pool options below from the current rate and the longest live age; Apply to take effect");
+	}
+}
+
+//! Baked bounds: the box the effect stays inside, measured over a run
+static void
+show_bounds_ui(void) {
+	ImGui_Checkbox("Show bounds", &show_bounds);
+
+	if (has_bounds) {
+		if (ImGui_DragFloat3Ex("Min", bounds.min, 1.f, -FLT_MAX, FLT_MAX, "%.1f", 0)) {
+			unsaved_changes = true;
+		}
+		if (ImGui_DragFloat3Ex("Max", bounds.max, 1.f, -FLT_MAX, FLT_MAX, "%.1f", 0)) {
+			unsaved_changes = true;
+		}
+	} else {
+		ImGui_TextDisabledUnformatted("No bounds saved; bake to measure them");
+	}
+	if (probe_stats.valid && !grain_bounds_is_empty(probe_stats.bounds)) {
+		ImGui_TextDisabled(
+			"Now: [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
+			probe_stats.bounds.min[0], probe_stats.bounds.min[1], probe_stats.bounds.min[2],
+			probe_stats.bounds.max[0], probe_stats.bounds.max[1], probe_stats.bounds.max[2]
+		);
+	}
+
+	ImGui_DragFloatEx("Bake duration", &bake_duration, 0.5f, 1.f, 600.f, "%.1fs", ImGuiSliderFlags_AlwaysClamp);
+	float padding_percent = bake_padding * 100.f;
+	if (ImGui_SliderFloatEx("Bake padding", &padding_percent, 0.f, 100.f, "%.0f%%", 0)) {
+		bake_padding = padding_percent / 100.f;
+	}
+	if (ImGui_IsItemHovered(0)) {
+		ImGui_SetTooltip("Grows each side of the measured box by this fraction of its extent");
+	}
+
+	if (baking) {
+		char overlay[32];
+		snprintf(overlay, sizeof(overlay), "%.1fs / %.1fs", bake_elapsed, bake_duration);
+		ImGui_ProgressBar(bake_elapsed / bake_duration, (ImVec2){ ImGui_CalcItemWidth(), 0.f }, overlay);
+		ImGui_SameLine();
+		if (ImGui_Button("Cancel")) {
+			cancel_bake();
+		}
+	} else {
+		if (ImGui_Button("Bake")) {
+			bake_acc = grain_bounds_empty();
+			bake_elapsed = 0.f;
+			baking = true;
+		}
+		if (ImGui_IsItemHovered(0)) {
+			ImGui_SetTooltip("Union the probed extent over the duration, pad it, and keep it as the bounds");
+		}
+		if (has_bounds) {
+			ImGui_SameLine();
+			if (ImGui_Button("Clear")) {
+				has_bounds = false;
+				bounds = grain_bounds_empty();
+				unsaved_changes = true;
+			}
+		}
+	}
+}
+
+// }}}
+
 static void
 recreate_pool(grain_archetype_info_t* archetype_info) {
 	grain_pool_t* new_pool = grain_create_pool(grain, (grain_pool_opts_t){
@@ -816,6 +1145,8 @@ recreate_pool(grain_archetype_info_t* archetype_info) {
 		}
 	}
 
+	reset_probe();
+	cancel_bake();
 	grain_destroy_pool(pool);
 	pool = new_pool;
 	particle_system = new_system;
@@ -1205,6 +1536,9 @@ bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
 		show_error(grain_get_last_error(grain));
 		bco_return();
 	}
+	if (has_bounds) {
+		grain_blueprint_set_bounds(snapshot, bounds);
+	}
 
 	// The document borrows the snapshot's strings: both only live until the
 	// JSON text has been printed
@@ -1332,6 +1666,8 @@ reset_editor_system(void) {
 		show_error(grain_get_last_error(grain));
 		return;
 	}
+	reset_probe();
+	cancel_bake();
 	grain_destroy_pool(pool);
 	pool = new_pool;
 	particle_system = grain_create_system(new_pool);
@@ -1341,6 +1677,8 @@ reset_editor_system(void) {
 	view_mode = GRAIN_VIEW_2D;
 	camera = DEFAULT_CAMERA;
 	current_pool_opts = pending_pool_opts = DEFAULT_POOL_OPTS;
+	has_bounds = false;
+	bounds = grain_bounds_empty();
 	snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
 	if (current_file_ref != NULL) {
@@ -1467,6 +1805,8 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 		show_error(grain_get_last_error(grain));
 		return false;
 	}
+	reset_probe();
+	cancel_bake();
 	grain_destroy_pool(pool);
 	pool = new_pool;
 	particle_system = grain_create_system(new_pool);
@@ -1503,6 +1843,8 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 	grain_blueprint_apply(blueprint, particle_system);
 	emission_rate = grain_blueprint_emission_rate(blueprint);
 	view_mode = grain_blueprint_view(blueprint);
+	has_bounds = grain_blueprint_bounds(blueprint, &bounds);
+	if (!has_bounds) { bounds = grain_bounds_empty(); }
 	camera = DEFAULT_CAMERA;
 	snprintf(
 		system_name.data, sizeof(system_name.data),
@@ -1698,6 +2040,12 @@ init(void) {
 		current_pool_opts = pending_pool_opts = DEFAULT_POOL_OPTS;
 		snprintf(system_name.data, sizeof(system_name.data), "%s", "Effect");
 
+		fit_margin = 0.25f;
+		show_bounds = true;
+		bake_duration = 10.f;
+		bake_padding = 0.25f;
+		bounds = grain_bounds_empty();
+
 		grain = grain_create();
 
 		noop_renderer = grain_define_renderer(
@@ -1760,6 +2108,7 @@ cleanup(void) {
 
 	bgame_free(modal_action, scene_allocator);
 
+	reset_probe();
 	grain_destroy_pool(pool);
 
 	sfree(log_text);
@@ -2109,6 +2458,12 @@ update(void) {
 				ImGui_SameLine();
 				ImGui_TextDisabledUnformatted("Recreates the pool; live particles reset");
 			}
+
+			ImGui_SeparatorText("Usage");
+			show_occupancy();
+
+			ImGui_SeparatorText("Bounds");
+			show_bounds_ui();
 		}
 		ImGui_End();
 	}
@@ -2233,6 +2588,7 @@ update(void) {
 
 	grain_tick(particle_system, CF_DELTA_TIME);
 	grain_end_update(grain);
+	step_probe();
 // }}}
 
 // Logging {{{
@@ -2348,6 +2704,8 @@ update(void) {
 			show_error(grain_get_last_error(grain));
 		} else {
 			archetype = new_archetype;
+			// The probe shader recompiles lazily; give a failed probe another go
+			probe_error_logged = false;
 			BLOG_INFO(
 				"Rebuilt archetype: %d emitter(s), %d affector(s), renderer %s",
 				(int)barray_len(archetype_emitters),
@@ -2369,6 +2727,12 @@ update(void) {
 	grain_end_render(grain);
 
 	debug_draw_end();
+	if (baking) {
+		// The envelope so far, growing as the run goes on
+		debug_draw_bounds(bake_acc, cf_make_color_rgba_f(1.f, 0.6f, 0.1f, 0.8f));
+	} else if (show_bounds && has_bounds) {
+		debug_draw_bounds(bounds, cf_make_color_rgba_f(0.3f, 0.9f, 1.f, 0.8f));
+	}
 
 	cf_app_draw_onto_screen(false);
 
