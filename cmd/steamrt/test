@@ -1,0 +1,38 @@
+#!/bin/sh -e
+
+BUILD_IMAGE=registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk:latest
+BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo}
+RELOADABLE=${RELOADABLE:-ON}
+
+if [ "${RELOADABLE}" = "ON" ]
+then
+	SUFFIX="reloadable"
+else
+	SUFFIX="static"
+fi
+
+BUILD_DIR="${BUILD_TYPE}-${SUFFIX}"
+
+if [ -r /etc/os-release ]
+then
+	. /etc/os-release
+elif [ -r /usr/lib/os-release ]
+then
+	. /usr/lib/os-release
+fi
+
+steamsdk() {
+	if [ "${ID}" = "steamrt" ]
+	then
+		"$@"
+	else
+		podman run \
+			--rm \
+			-v $(pwd):/workspace \
+			-w /workspace \
+			${BUILD_IMAGE} \
+			"$@"
+	fi
+}
+
+steamsdk bin/steamrt/${BUILD_DIR}/grain-tests "$@"

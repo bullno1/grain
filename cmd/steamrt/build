@@ -13,7 +13,13 @@ fi
 
 BUILD_DIR="${BUILD_TYPE}-${SUFFIX}"
 
-. /etc/os-release || true
+if [ -r /etc/os-release ]
+then
+	. /etc/os-release
+elif [ -r /usr/lib/os-release ]
+then
+	. /usr/lib/os-release
+fi
 
 mkdir -p .build/steamrt
 

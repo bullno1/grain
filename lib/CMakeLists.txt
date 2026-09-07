@@ -7,10 +7,6 @@ set(SOURCES
 	"src/gen/update_vert_bytecode.h"
 )
 
-if (WIN32)
-	set(SOURCES ${SOURCES} "src/resources.rc")
-endif ()
-
 add_library(grain STATIC EXCLUDE_FROM_ALL "${SOURCES}")
 target_link_libraries(grain PRIVATE cute)
 target_include_directories(grain PUBLIC "include")
@@ -31,12 +27,26 @@ add_custom_command(
 )
 target_sources(grain PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/glsl_stamp.h")
 target_include_directories(grain PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-if (WIN32)
-	set_source_files_properties("src/resources.rc" PROPERTIES OBJECT_DEPENDS "${GRAIN_GLSL_SOURCES}")
-endif ()
+
 if (MSVC)
+	# MSVC has no .incbin, so xincbin.h falls back to Win32 resources and
+	# looks them up in the module holding the lib's code. A resource inside a
+	# static library never reaches that module: the linker only pulls archive
+	# members that resolve a symbol, and a compiled .res defines none. The
+	# script is therefore an INTERFACE source, compiled into every executable
+	# or DLL that links grain.
+	target_sources(grain INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src/resources.rc")
+	# rc resolves the RCDATA paths against its include path, so the prefix is
+	# empty here and the source dir is the include dir instead
 	target_compile_definitions(grain PRIVATE GRAIN_SRC_DIR=)
-	target_include_directories(grain PRIVATE "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}/src>")
+	target_compile_definitions(grain INTERFACE "$<$<COMPILE_LANGUAGE:RC>:GRAIN_SRC_DIR=>")
+	target_include_directories(grain INTERFACE
+		"$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+		# For glsl_stamp.h: the script includes it so that the resource
+		# compiler's dependency scan (which only sees #includes) re-embeds the
+		# payloads when a glsl file changes
+		"$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_BINARY_DIR}>"
+	)
 else ()
 	target_compile_definitions(grain PRIVATE GRAIN_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/")
 endif ()
