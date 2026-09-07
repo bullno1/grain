@@ -31,6 +31,7 @@ Three targets plus data:
 - `editor/` — `grain-editor`, an interactive authoring app built on the bgame framework (dear imgui UI, scene system).
 - `tests/` — `grain-tests`, headless unit tests using btest from `deps/blibs`.
 - `modules/` — example DSL modules, organized by kind: `emitters/`, `affectors/`, `renderer/`.
+- `demos/` — standalone sample programs (plain CF apps, no bgame), one directory each. `demos/rain/` (`grain-demo-rain`) shows a canvas used as a collision surface: platforms are drawn into an offscreen canvas that a `SurfaceBounce` affector samples. Module sources are incbin'd through a `resources.rc` like `lib/` does; demo-specific modules live in `demos/<name>/modules/`. Desktop only (excluded from the web build).
 
 ### The DSL and module model
 

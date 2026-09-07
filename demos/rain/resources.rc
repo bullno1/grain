@@ -1,0 +1,13 @@
+#include "xincbin.h"
+
+// Stock modules from the repo's library
+XINCBIN(rain_emitter_box, GRAIN_MODULES_DIR "emitters/Box.glsl")
+XINCBIN(rain_emitter_lifetime, GRAIN_MODULES_DIR "emitters/Lifetime.glsl")
+XINCBIN(rain_affector_gravity, GRAIN_MODULES_DIR "affectors/Gravity.glsl")
+XINCBIN(rain_affector_integrate, GRAIN_MODULES_DIR "affectors/Integrate.glsl")
+XINCBIN(rain_affector_age, GRAIN_MODULES_DIR "affectors/Age.glsl")
+
+// Modules specific to this demo
+XINCBIN(rain_emitter_raindrop, RAIN_DEMO_DIR "modules/Raindrop.glsl")
+XINCBIN(rain_affector_surface_bounce, RAIN_DEMO_DIR "modules/SurfaceBounce.glsl")
+XINCBIN(rain_renderer_streak, RAIN_DEMO_DIR "modules/Streak.glsl")
