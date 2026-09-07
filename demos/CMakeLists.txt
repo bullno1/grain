@@ -24,6 +24,20 @@ function (grain_add_demo NAME)
 	add_executable(${TARGET} "${SOURCES}")
 	target_link_libraries(${TARGET} PRIVATE grain cute)
 	target_include_directories(${TARGET} PRIVATE "${GEN_DIR}")
+
+	if (EMSCRIPTEN)
+		# Same page and link setup as the editor (see add_bgame_app): the bgame
+		# shell provides the canvas, loading overlay and progress bar. CF's own
+		# link options already bring ASYNCIFY, which is what lets the demos'
+		# plain cf_app_is_running loop run in the browser
+		set_target_properties(${TARGET} PROPERTIES SUFFIX ".html")
+		target_compile_options(${TARGET} PRIVATE -gsplit-dwarf)
+		target_link_libraries(${TARGET} PRIVATE bgame-emscripten-shell)
+		target_link_options(${TARGET} PRIVATE
+			-sMALLOC=emmalloc
+			-gseparate-dwarf
+		)
+	endif ()
 endfunction ()
 
 grain_add_demo(rain)
