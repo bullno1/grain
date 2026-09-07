@@ -24,6 +24,8 @@ void main() {
 	ctx.frame_dt = clock.dt;
 	ctx.dt = sch.emit ? sch.age : clock.dt;
 	ctx.time = sch.emit ? sch.birth : clock.elapsed;
+	grain_system_transform = grain_clock_transform(clock);
+	ctx.transform = grain_system_transform;
 
 	process(particle, params, ctx);
 	result = grain_Color;

@@ -1,7 +1,7 @@
 // Grain-internal builtins. Included after user modules (see api.glsl), so user
 // code cannot reference anything in here.
 
-// Mirrors grain_clock_entry_t. Two vec4s wide: see the comment there.
+// Mirrors grain_clock_entry_t. Five vec4s wide: see the comment there.
 struct grain_SystemClock {
     float elapsed;
     float dt;          // elapsed advanced since the last update pass
@@ -11,7 +11,21 @@ struct grain_SystemClock {
     float burst_base;  // counter position where the burst window starts, mod pool_size
     float burst_count; // burst particles this pass: window is [base, base + count)
     float grain_pad0;
+    // First three rows of the system's local-to-world matrix; the fourth is (0, 0, 0, 1)
+    vec4  transform_row0;
+    vec4  transform_row1;
+    vec4  transform_row2;
 };
+
+// Rebuilds the local-to-world matrix from its stored rows; mat4 is column-major
+mat4 grain_clock_transform(grain_SystemClock clock) {
+	return transpose(mat4(
+		clock.transform_row0,
+		clock.transform_row1,
+		clock.transform_row2,
+		vec4(0.0, 0.0, 0.0, 1.0)
+	));
+}
 
 // A particle's birth time is grain-internal state: it lives in a reserved lane of the
 // attribute texture, outside ParticleAttrs, so modules can neither read nor clobber
@@ -88,7 +102,7 @@ grain_Schedule grain_observe(float birth, grain_SystemClock clock) {
 	return s;
 }
 
-grain_SystemClock grain_unpack_SystemClock(uvec4 a, uvec4 b) {
+grain_SystemClock grain_unpack_SystemClock(uvec4 a, uvec4 b, uvec4 c, uvec4 d, uvec4 e) {
 	grain_SystemClock clock;
 	clock.elapsed    = uintBitsToFloat(a.x);
 	clock.dt         = uintBitsToFloat(a.y);
@@ -98,6 +112,9 @@ grain_SystemClock grain_unpack_SystemClock(uvec4 a, uvec4 b) {
 	clock.burst_base  = uintBitsToFloat(b.y);
 	clock.burst_count = uintBitsToFloat(b.z);
 	clock.grain_pad0  = 0.0;
+	clock.transform_row0 = uintBitsToFloat(c);
+	clock.transform_row1 = uintBitsToFloat(d);
+	clock.transform_row2 = uintBitsToFloat(e);
 	return clock;
 }
 

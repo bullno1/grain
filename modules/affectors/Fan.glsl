@@ -25,14 +25,15 @@ Params(
 )
 
 void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
-	vec2 d = particle.position - params.position;
+	vec2 d = particle.position - to_world(params.position);
 	float dist = length(d);
 	if (dist <= 0.0 || dist >= params.max_range) { return; }
 
 	float mid = (params.min_angle + params.max_angle) * 0.5;
 	float half_spread = (params.max_angle - params.min_angle) * 0.5;
 	vec2 dir = d / dist;
-	if (half_spread < PI && dot(dir, unit_vec(mid)) < cos(half_spread)) {
+	vec2 axis = normalize(to_world_dir(unit_vec(mid)));
+	if (half_spread < PI && dot(dir, axis) < cos(half_spread)) {
 			return;
 	}
 

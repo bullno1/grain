@@ -17,7 +17,9 @@ Params(
 )
 
 void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
-	vec2 d = particle.position - params.position;
+	// The box follows the system's translation but stays axis-aligned
+	vec2 center = to_world(params.position);
+	vec2 d = particle.position - center;
 	vec2 half_size = params.size * 0.5;
 	vec2 overlap = half_size - abs(d);
 	if (overlap.x <= 0.0 || overlap.y <= 0.0) { return; }
@@ -25,11 +27,11 @@ void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 	// Resolve along the axis of least penetration
 	if (overlap.x < overlap.y) {
 		float s = d.x < 0.0 ? -1.0 : 1.0;
-		particle.position.x = params.position.x + s * half_size.x;
+		particle.position.x = center.x + s * half_size.x;
 		particle.velocity = deflect(particle.velocity, vec2(s, 0.0), params.bounciness);
 	} else {
 		float s = d.y < 0.0 ? -1.0 : 1.0;
-		particle.position.y = params.position.y + s * half_size.y;
+		particle.position.y = center.y + s * half_size.y;
 		particle.velocity = deflect(particle.velocity, vec2(0.0, s), params.bounciness);
 	}
 }

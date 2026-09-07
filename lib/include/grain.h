@@ -6,6 +6,7 @@
 #include <cute_graphics.h>
 #include <cute_draw.h>
 #include <cute_json.h>
+#include <cute_math3d.h>
 
 typedef struct grain_s grain_t;
 typedef struct grain_emitter_s grain_emitter_t;
@@ -297,6 +298,48 @@ grain_set_emission_rate(grain_system_t* system, float particles_per_second);
  */
 void
 grain_burst(grain_system_t* system, int count);
+
+/**
+ * Set a system's local-to-world transform; identity by default.
+ *
+ * The transform is instance state, not authoring state: it is not a module
+ * parameter and blueprints do not save it. Modules read it as `ctx.transform`
+ * in every stage and through the `to_world` / `to_world_dir` builtins, which
+ * is where its meaning is decided:
+ *
+ * * World-space effects apply it at emission: emitters place particles with
+ *   `to_world(params.position)` and orient them with `to_world_dir(...)`,
+ *   positional affectors anchor with `to_world(params.position)`. Moving the
+ *   system leaves particles already emitted where they are. The bundled
+ *   modules follow this convention.
+ * * Local-space effects apply it in the renderer instead, e.g.
+ *   `grain_transform * vec4(to_world(particle.position), 1.0)`, so every
+ *   particle moves rigidly with the system. Emitters and affectors then work
+ *   in local coordinates and must not apply it.
+ *
+ * The value reaches the GPU with the next update pass, like emission.
+ */
+void
+grain_set_transform(grain_system_t* system, CF_M4x4 transform);
+
+CF_M4x4
+grain_get_transform(grain_system_t* system);
+
+//! Widen a 2D affine transform, e.g. from CF's draw stack, into a CF_M4x4
+static inline CF_M4x4
+grain_m4x4_from_m3x2(CF_M3x2 m) {
+	CF_M4x4 out = cf_m4_identity();
+	out.elements[0]  = m.m.x.x; out.elements[1]  = m.m.x.y;
+	out.elements[4]  = m.m.y.x; out.elements[5]  = m.m.y.y;
+	out.elements[12] = m.p.x;   out.elements[13] = m.p.y;
+	return out;
+}
+
+//! @ref grain_set_transform for 2D callers
+static inline void
+grain_set_transform_2d(grain_system_t* system, CF_M3x2 transform) {
+	grain_set_transform(system, grain_m4x4_from_m3x2(transform));
+}
 
 void
 grain_set_emitter_parameter(

@@ -22,8 +22,8 @@ Params(
 )
 
 void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
-	particle.position = params.position;
+	particle.position = to_world(params.position);
 	float speed = rand_range(params.min_speed, params.max_speed);
 	float angle = rand_range(params.min_angle, params.max_angle);
-	particle.velocity = unit_vec(angle) * speed;
+	particle.velocity = to_world_dir(unit_vec(angle) * speed);
 }

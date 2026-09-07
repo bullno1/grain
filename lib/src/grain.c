@@ -9,6 +9,7 @@
 
 struct grain_system_s {
 	grain_pool_t* pool;
+	CF_M4x4 transform;  // local -> world, see grain_set_transform
 };
 
 typedef struct {
@@ -1105,7 +1106,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(archetype_update, "}\n");
 
 	sappend    (archetype_update, "grain_SystemClock grain_load_SystemClock(uint i) {\n");
-	sappend    (archetype_update, "\treturn grain_unpack_SystemClock(grain_system_clocks[i * 2u], grain_system_clocks[i * 2u + 1u]);\n");
+	sappend    (archetype_update, "\treturn grain_unpack_SystemClock(grain_system_clocks[i * 5u], grain_system_clocks[i * 5u + 1u], grain_system_clocks[i * 5u + 2u], grain_system_clocks[i * 5u + 3u], grain_system_clocks[i * 5u + 4u]);\n");
 	sappend    (archetype_update, "}\n");
 	sappend    (archetype_update, "#else\n");
 	sfmt_append(archetype_update, "layout(std430, set = GRAIN_SAMPLER_SET, binding = %d) readonly buffer grain_system_params { SystemParams grain_system_params[]; };\n", num_textures + num_user_samplers + 0);
@@ -1241,7 +1242,7 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 	sappend(archetype_render, "}\n");
 
 	sappend    (archetype_render, "grain_SystemClock grain_load_SystemClock(uint i) {\n");
-	sappend    (archetype_render, "\treturn grain_unpack_SystemClock(grain_system_clocks[i * 2u], grain_system_clocks[i * 2u + 1u]);\n");
+	sappend    (archetype_render, "\treturn grain_unpack_SystemClock(grain_system_clocks[i * 5u], grain_system_clocks[i * 5u + 1u], grain_system_clocks[i * 5u + 2u], grain_system_clocks[i * 5u + 3u], grain_system_clocks[i * 5u + 4u]);\n");
 	sappend    (archetype_render, "}\n");
 	sappend    (archetype_render, "uint grain_load_draw_region(uint i) {\n");
 	sappend    (archetype_render, "\treturn grain_draw_list[i / 4][i % 4];\n");
@@ -1794,6 +1795,7 @@ grain_create_system(grain_pool_t* pool) {
 		if (pool->systems[i].pool == NULL) {
 			grain_system_t* system = &pool->systems[i];
 			system->pool = pool;
+			system->transform = cf_m4_identity();
 			grain_init_clock(&pool->clocks[i], pool->opts.lifetime_budget, 0.0);
 			return system;
 		}
@@ -1911,6 +1913,19 @@ grain_burst(grain_system_t* system, int count) {
 	grain_touch(pool);
 }
 
+void
+grain_set_transform(grain_system_t* system, CF_M4x4 transform) {
+	system->transform = transform;
+	// The update pass is what uploads the clock buffer; a system that is not
+	// ticking still needs its new transform to reach the GPU
+	grain_touch(system->pool);
+}
+
+CF_M4x4
+grain_get_transform(grain_system_t* system) {
+	return system->transform;
+}
+
 static int
 grain_find_system_hwm(grain_pool_t* pool) {
 	for (int i = pool->opts.max_systems - 1; i >= 0; --i) {
@@ -1934,6 +1949,13 @@ grain_update_pool(grain_t* grain, grain_pool_t* pool) {
 		grain_clock_entry_t* entry = grain_index_ssbo(&pool->clock_ssbo, sizeof(grain_clock_entry_t), i);
 		if (pool->systems[i].pool != NULL) {
 			*entry = grain_snapshot_clock(&pool->clocks[i], pool->pool_size);
+			// CF_M4x4 is column-major; the entry carries the first three rows
+			const float* m = pool->systems[i].transform.elements;
+			for (int row = 0; row < 3; ++row) {
+				for (int col = 0; col < 4; ++col) {
+					entry->transform[row * 4 + col] = m[col * 4 + row];
+				}
+			}
 		} else {
 			*entry = (grain_clock_entry_t){ 0 };
 		}

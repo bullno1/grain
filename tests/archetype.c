@@ -505,3 +505,78 @@ BTEST(archetype, composes_3d) {
 	);
 	BTEST_ASSERT_EX(archetype != NULL, "%s", grain_get_last_error(test_grain()));
 }
+
+BTEST(archetype, system_transform_builtins) {
+	// ctx.transform and the to_world family are available in every stage, for
+	// both vec2 and vec3, on the SSBO and the GLES (uvec4-unpacked) paths
+	grain_emitter_t* emitter = grain_define_emitter(
+		test_grain(),
+		"Emitter(Placed)\n"
+		"Requires(\n"
+		"	vec2 position;\n"
+		"	vec2 velocity;\n"
+		"	vec3 origin;\n"
+		")\n"
+		"Params(\n"
+		"	vec2 position;\n"
+		"	float angle;\n"
+		")\n"
+		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	particle.position = to_world(params.position);\n"
+		"	particle.velocity = to_world_dir(unit_vec(params.angle));\n"
+		"	particle.origin = to_world(vec3(params.position, 1.0)) + to_world_dir(vec3(0.0, 0.0, 1.0));\n"
+		"	particle.origin += (ctx.transform * vec4(0.0, 0.0, 0.0, 1.0)).xyz;\n"
+		"}\n"
+	);
+	BTEST_ASSERT_EX(emitter != NULL, "%s", grain_get_last_error(test_grain()));
+
+	grain_affector_t* affector = grain_define_affector(
+		test_grain(),
+		"Affector(Anchored)\n"
+		"Requires(\n"
+		"	vec2 position;\n"
+		"	vec2 velocity;\n"
+		")\n"
+		"Params(\n"
+		"	vec2 anchor;\n"
+		")\n"
+		"void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	particle.velocity += (to_world(params.anchor) - particle.position) * ctx.dt;\n"
+		"}\n"
+	);
+	BTEST_ASSERT_EX(affector != NULL, "%s", grain_get_last_error(test_grain()));
+
+	grain_renderer_t* renderer = grain_define_renderer(
+		test_grain(),
+		"Renderer(LocalQuad)\n"
+		"Requires(\n"
+		"	vec2 position;\n"
+		")\n"
+		"Params(\n"
+		"	vec2 size;\n"
+		")\n"
+		"#if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX\n"
+		"void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	vec2 p = to_world(particle.position) + to_world_dir(quad() * params.size);\n"
+		"	gl_Position = grain_transform * ctx.transform * vec4(p, 0.0, 1.0);\n"
+		"}\n"
+		"#elif GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_FRAGMENT\n"
+		"void process(ParticleAttrs particle, ModuleParams params, Ctx ctx) {\n"
+		"	grain_Color = vec4(to_world(vec3(1.0)), ctx.transform[3].w);\n"
+		"}\n"
+		"#endif\n"
+	);
+	BTEST_ASSERT_EX(renderer != NULL, "%s", grain_get_last_error(test_grain()));
+
+	grain_archetype_t* archetype = grain_define_archetype(
+		test_grain(), "Test",
+		(grain_archetype_spec_t){
+			.emitters = &emitter,
+			.num_emitters = 1,
+			.affectors = &affector,
+			.num_affectors = 1,
+			.renderer = renderer,
+		}
+	);
+	BTEST_ASSERT_EX(archetype != NULL, "%s", grain_get_last_error(test_grain()));
+}

@@ -14,6 +14,6 @@ Params(
 )
 
 void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
-	particle.position = params.position + (vec2(rand(), rand()) - 0.5) * params.size;
+	particle.position = to_world(params.position + (vec2(rand(), rand()) - 0.5) * params.size);
 	particle.velocity = vec2(0.0);
 }

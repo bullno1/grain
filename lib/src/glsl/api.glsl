@@ -53,10 +53,35 @@ struct Ctx {
 	float dt;
 	float frame_dt;
 	float time;
+	mat4  transform;  // the system's local-to-world matrix, see grain_set_transform
 };
 
 const float PI  = 3.14159265358979;
 const float TAU = 6.28318530717959;
+
+// The current system's local-to-world matrix, the same value as ctx.transform;
+// grain assigns it before process() runs so the helpers below need no argument.
+mat4 grain_system_transform;
+
+// Local -> world for points: applies the system's full transform.
+// The 2D overloads work in the z = 0 plane.
+vec3 to_world(vec3 p) {
+	return (grain_system_transform * vec4(p, 1.0)).xyz;
+}
+
+vec2 to_world(vec2 p) {
+	return to_world(vec3(p, 0.0)).xy;
+}
+
+// Local -> world for directions and offsets: rotation and scale only, no translation
+vec3 to_world_dir(vec3 d) {
+	// w = 0 drops the translation; cute-spirv has no mat3(mat4) constructor
+	return (grain_system_transform * vec4(d, 0.0)).xyz;
+}
+
+vec2 to_world_dir(vec2 d) {
+	return to_world_dir(vec3(d, 0.0)).xy;
+}
 
 // Maps a unit UV into a binding's atlas rect
 vec2 atlas_uv(vec4 uvrect, vec2 uv) {

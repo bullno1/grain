@@ -19,7 +19,7 @@
  */
 
 #include <grain.h>
-#include <cute_math3d.h>  // CF_V3; grain.h's own includes stop at cute_draw.h
+#include <cute_math3d.h>
 #include <string.h>
 
 #define GRAIN_BAKED_VERSION 1

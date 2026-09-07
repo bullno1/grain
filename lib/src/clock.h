@@ -35,8 +35,12 @@ typedef struct {
 	double   wrap_pending;  // total `elapsed` shift since the last upload
 } grain_particle_clock_t;
 
-// What the GPU receives per system. Two vec4s wide so the GLES path can carry it as
-// a pair of RGBA32UI texels; padded explicitly so std430 and the texel path agree.
+// What the GPU receives per system. A whole number of vec4s wide so the GLES path
+// can carry it as a run of uvec4s; padded explicitly so std430 and that path agree.
+//
+// The clock rides with the system's local-to-world transform: both are per-system
+// state that every pass needs, and this buffer is already bound to the update and
+// render passes, so the transform costs no extra binding or upload.
 typedef struct {
 	float elapsed;
 	float dt;           // elapsed advanced since the last update pass
@@ -46,7 +50,14 @@ typedef struct {
 	float burst_base;   // counter position where the burst window starts, mod pool_size
 	float burst_count;  // burst particles this pass: window is [base, base + count)
 	float pad0;
+
+	// The first three rows of the system's local-to-world matrix, row-major, i.e.
+	// row r is (m[r][0], m[r][1], m[r][2], m[r][3]). The fourth row of an affine
+	// transform is always (0, 0, 0, 1), so it is not stored; the shader rebuilds it.
+	float transform[12];
 } grain_clock_entry_t;
+
+_Static_assert(sizeof(grain_clock_entry_t) == 5 * 16, "grain_clock_entry_t must be a whole number of vec4s");
 
 static inline void
 grain_init_clock(grain_particle_clock_t* c, double lifetime_budget, double rate) {

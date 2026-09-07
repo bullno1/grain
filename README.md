@@ -59,7 +59,19 @@ A module is a self-contained compilation unit with:
 
   * `ParticleAttrs` is a struct containing all the fields in the `Requires` block.
   * `ModuleParams` is a struct containing all the fields in the `Params` block.
-  * `Ctx` is a system defined struct with timing informations such as delta time or elapsed time.
+  * `Ctx` is a system defined struct with timing informations such as delta time or elapsed time,
+    plus `transform`: the system's local-to-world matrix (`mat4`), set from C with `grain_set_transform`
+    and identity by default.
+    The `to_world(p)` and `to_world_dir(d)` builtins apply it to points and directions respectively,
+    with `vec2` overloads working in the z = 0 plane.
+
+    The transform is instance state rather than a parameter, so it is not saved in blueprints, and the modules decide where it applies:
+
+    * World-space effects apply it at emission, e.g. `particle.position = to_world(params.position)`,
+      and positional affectors anchor with `to_world(params.position)`.
+      Moving the system leaves already emitted particles where they are; the bundled modules follow this convention.
+    * Local-space effects apply it in the renderer instead, e.g. `grain_transform * vec4(to_world(particle.position), 1.0)`,
+      so every particle moves rigidly with the system. Emitters and affectors then work in local coordinates and must not apply it.
 
 Modules are classified into several kinds:
 

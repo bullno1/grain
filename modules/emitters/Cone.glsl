@@ -22,11 +22,11 @@ Params(
 )
 
 void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
-	particle.position = params.position;
+	particle.position = to_world(params.position);
 
 	vec3 axis = dot(params.axis, params.axis) > 0.0
-		? normalize(params.axis)
-		: vec3(0.0, 1.0, 0.0);
+		? normalize(to_world_dir(params.axis))
+		: normalize(to_world_dir(vec3(0.0, 1.0, 0.0)));
 
 	// Uniform over the spherical cap within `spread` of the axis: uniform in
 	// the cosine of the angle off the axis, uniform in the turn around it
