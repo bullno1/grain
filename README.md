@@ -1,8 +1,12 @@
 # grain
 
+[![Build status](https://github.com/bullno1/grain/actions/workflows/build.yml/badge.svg)](https://github.com/bullno1/grain/actions/workflows/build.yml)
+
 Grain is a GPU-driven composable particle system with its own DSL.
 
 It is designed to be used with [Cute Framework](https://github.com/RandyGaul/cute_framework).
+
+![screenshot](screenshot.png)
 
 # Building
 
