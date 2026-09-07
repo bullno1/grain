@@ -1,6 +1,7 @@
 #include "shared.h"
 #include <grain_fire.h>
 #include <grain_snow.h>
+#include <grain_paths.h>
 
 static btest_suite_t baked_codegen = {
 	.name = "baked_codegen",
@@ -100,4 +101,24 @@ BTEST(baked_codegen, snow_reloads_over_fire) {
 	}
 
 	grain_destroy_blueprint(snow);
+}
+
+// tests/effects/paths.json embeds no sources: grainc read every module from
+// its `path`, relative to the effect file
+BTEST(baked_codegen, paths_resolve_modules) {
+	grain_blueprint_t* blueprint = grain_paths_load(test_grain());
+	BTEST_ASSERT_EX(blueprint != NULL, "%s", grain_get_last_error(test_grain()));
+
+	BTEST_EXPECT(grain_blueprint_name(blueprint) == sintern("Paths"));
+	BTEST_EXPECT_EQUAL("%f", grain_blueprint_emission_rate(blueprint), 40.f);
+
+	grain_archetype_info_t info = grain_inspect_archetype(grain_blueprint_archetype(blueprint));
+	BTEST_ASSERT_EQUAL("%d", info.num_emitters, 2);
+	BTEST_EXPECT(info.emitters[0].name == sintern("Point"));
+	BTEST_EXPECT(info.emitters[1].name == sintern("Lifetime"));
+	BTEST_ASSERT_EQUAL("%d", info.num_affectors, 2);
+	BTEST_EXPECT(info.renderer.name == sintern("Quad"));
+	BTEST_EXPECT(info.params[grain_paths.Quad.size.index].name == sintern("size"));
+
+	grain_destroy_blueprint(blueprint);
 }

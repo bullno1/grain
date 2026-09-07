@@ -15,6 +15,12 @@ grain_compile_effect(
 	snow
 	"${CMAKE_CURRENT_BINARY_DIR}/gen/grain_snow.h"
 )
+# References its modules by path only: covers grainc's path resolution
+grain_compile_effect(
+	"${CMAKE_CURRENT_SOURCE_DIR}/effects/paths.json"
+	paths
+	"${CMAKE_CURRENT_BINARY_DIR}/gen/grain_paths.h"
+)
 
 set(SOURCES
 	"main.c"
@@ -33,6 +39,7 @@ set(SOURCES
 	"samples.c"
 	"${CMAKE_CURRENT_BINARY_DIR}/gen/grain_fire.h"
 	"${CMAKE_CURRENT_BINARY_DIR}/gen/grain_snow.h"
+	"${CMAKE_CURRENT_BINARY_DIR}/gen/grain_paths.h"
 )
 
 add_executable(grain-tests "${SOURCES}")

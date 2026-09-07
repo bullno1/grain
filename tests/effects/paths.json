@@ -1,0 +1,38 @@
+{
+	"grain_version": 1,
+	"name": "Paths",
+	"emission_rate": 40.0,
+	"pool": {
+		"max_systems": 2,
+		"max_emission_rate": 64.0,
+		"lifetime_budget": 2.0,
+		"max_burst_size": 16
+	},
+	"modules": [
+		{ "kind": "emitter", "name": "Point", "path": "../../modules/emitters/Point.glsl" },
+		{ "kind": "emitter", "name": "Lifetime", "path": "../../modules/emitters/Lifetime.glsl" },
+		{ "kind": "affector", "name": "Integrate", "path": "../../modules/affectors/Integrate.glsl" },
+		{ "kind": "affector", "name": "Age", "path": "../../modules/affectors/Age.glsl" },
+		{ "kind": "renderer", "name": "Quad", "path": "../../modules/renderer/Quad.glsl" }
+	],
+	"archetype": {
+		"emitters": [
+			{
+				"module": "Point",
+				"params": {
+					"position": [1.0, 2.0],
+					"min_speed": 10.0,
+					"max_speed": 20.0,
+					"min_angle": 0.0,
+					"max_angle": 3.0
+				}
+			},
+			{ "module": "Lifetime", "params": { "min_lifetime": 0.5, "max_lifetime": 1.5 } }
+		],
+		"affectors": [
+			{ "module": "Integrate" },
+			{ "module": "Age" }
+		],
+		"renderer": { "module": "Quad", "params": { "size": [4.0, 4.0] } }
+	}
+}

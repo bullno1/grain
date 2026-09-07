@@ -1,0 +1,42 @@
+{
+	"grain_version": 1,
+	"name": "FireworkTrail",
+	"emission_rate": 260.0,
+	"pool": {
+		"max_systems": 12,
+		"max_emission_rate": 260.0,
+		"lifetime_budget": 0.8,
+		"max_burst_size": 0
+	},
+	"modules": [
+		{ "kind": "emitter", "name": "Trail", "path": "modules/Trail.glsl" },
+		{ "kind": "emitter", "name": "Lifetime", "path": "../../modules/emitters/Lifetime.glsl" },
+		{ "kind": "affector", "name": "Gravity", "path": "../../modules/affectors/Gravity.glsl" },
+		{ "kind": "affector", "name": "Integrate", "path": "../../modules/affectors/Integrate.glsl" },
+		{ "kind": "affector", "name": "Age", "path": "../../modules/affectors/Age.glsl" },
+		{ "kind": "renderer", "name": "Spark", "path": "modules/Spark.glsl" }
+	],
+	"archetype": {
+		"emitters": [
+			{ "module": "Trail", "params": { "spread": 2.0, "min_speed": 20.0, "max_speed": 70.0 } },
+			{ "module": "Lifetime", "params": { "min_lifetime": 0.35, "max_lifetime": 0.8 } }
+		],
+		"affectors": [
+			{ "module": "Gravity", "params": { "gravity": 120.0 } },
+			{ "module": "Integrate" },
+			{ "module": "Age" }
+		],
+		"renderer": {
+			"module": "Spark",
+			"params": {
+				"radius": 1.0,
+				"glow": 2.0,
+				"color": 4286634495,
+				"color2": 4280710143,
+				"fade_time": 0.4,
+				"twinkle": 0.3,
+				"additivity": 0.8
+			}
+		}
+	}
+}

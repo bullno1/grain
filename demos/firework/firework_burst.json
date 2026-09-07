@@ -1,0 +1,45 @@
+{
+	"grain_version": 1,
+	"name": "FireworkBurst",
+	"emission_rate": 0.0,
+	"pool": {
+		"max_systems": 12,
+		"max_emission_rate": 1.0,
+		"lifetime_budget": 2.4,
+		"max_burst_size": 420
+	},
+	"modules": [
+		{ "kind": "emitter", "name": "Burst", "path": "modules/Burst.glsl" },
+		{ "kind": "emitter", "name": "Lifetime", "path": "../../modules/emitters/Lifetime.glsl" },
+		{ "kind": "affector", "name": "Gravity", "path": "../../modules/affectors/Gravity.glsl" },
+		{ "kind": "affector", "name": "Wind", "path": "../../modules/affectors/Wind.glsl" },
+		{ "kind": "affector", "name": "Integrate", "path": "../../modules/affectors/Integrate.glsl" },
+		{ "kind": "affector", "name": "Age", "path": "../../modules/affectors/Age.glsl" },
+		{ "kind": "renderer", "name": "Spark", "path": "modules/Spark.glsl" }
+	],
+	"archetype": {
+		"emitters": [
+			{ "module": "Burst" },
+			{ "module": "Lifetime", "params": { "min_lifetime": 1.1, "max_lifetime": 2.4 } }
+		],
+		"affectors": [
+			{ "module": "Gravity", "params": { "gravity": 90.0 } },
+			{
+				"module": "Wind",
+				"params": { "velocity": [0.0, 0.0], "drag": 1.4, "gustiness": 0.0, "gust_frequency": 0.0 }
+			},
+			{ "module": "Integrate" },
+			{ "module": "Age" }
+		],
+		"renderer": {
+			"module": "Spark",
+			"params": {
+				"radius": 1.4,
+				"glow": 3.0,
+				"fade_time": 0.7,
+				"twinkle": 0.7,
+				"additivity": 0.7
+			}
+		}
+	}
+}

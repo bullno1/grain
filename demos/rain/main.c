@@ -2,22 +2,20 @@
 // The platforms are drawn into an offscreen canvas that doubles as a collision
 // surface: a SurfaceBounce affector samples it, bounces drops off it and turns
 // each upward bounce into a short-lived V-shaped splash.
+//
+// The effect is baked from rain.json by grainc: the archetype loads from
+// precompiled bytecode, tuned values come from the file, and params are
+// addressed through the generated typed handles.
 #include <cute.h>
-#include <grain.h>
+#include <grain_rain.h>
 #include <math.h>
 #include <stdio.h>
-#include <string.h>
-#include "resources.rc"
-// Hash stamp of the incbin'd modules: changes when any of them does, so
-// caching compilers rebuild (see CMakeLists.txt)
-#if __has_include("demo_stamp.h")
-#	include "demo_stamp.h"
-#endif
 
 #define WINDOW_WIDTH 960
 #define WINDOW_HEIGHT 540
 
-// Upper bound of platform speed the surface canvas can encode in its RG channels
+// Upper bound of platform speed the surface canvas can encode in its RG
+// channels; must match SurfaceBounce.max_surface_speed in rain.json
 #define MAX_SURFACE_SPEED 300.f
 
 typedef struct {
@@ -81,12 +79,6 @@ draw_platforms(float time) {
 	cf_draw_pop_color();
 }
 
-static const char*
-source_of(xincbin_data_t resource) {
-	// xincbin null-terminates its payloads
-	return (const char*)resource.data;
-}
-
 #define CHECK(COND) \
 	do { \
 		if (!(COND)) { \
@@ -128,56 +120,20 @@ main(int argc, char* argv[]) {
 
 	grain_t* grain = grain_create();
 
-	grain_emitter_t* box = grain_define_emitter(grain, source_of(XINCBIN_GET(rain_emitter_box)));
-	CHECK(box != NULL);
-	grain_emitter_t* lifetime = grain_define_emitter(grain, source_of(XINCBIN_GET(rain_emitter_lifetime)));
-	CHECK(lifetime != NULL);
-	grain_emitter_t* raindrop = grain_define_emitter(grain, source_of(XINCBIN_GET(rain_emitter_raindrop)));
-	CHECK(raindrop != NULL);
-
-	grain_affector_t* gravity = grain_define_affector(grain, source_of(XINCBIN_GET(rain_affector_gravity)));
-	CHECK(gravity != NULL);
-	grain_affector_t* integrate = grain_define_affector(grain, source_of(XINCBIN_GET(rain_affector_integrate)));
-	CHECK(integrate != NULL);
-	grain_affector_t* surface_bounce = grain_define_affector(grain, source_of(XINCBIN_GET(rain_affector_surface_bounce)));
-	CHECK(surface_bounce != NULL);
-	grain_affector_t* age = grain_define_affector(grain, source_of(XINCBIN_GET(rain_affector_age)));
-	CHECK(age != NULL);
-
-	grain_renderer_t* streak = grain_define_renderer(grain, source_of(XINCBIN_GET(rain_renderer_streak)));
-	CHECK(streak != NULL);
-
-	// Module order is the index used for parameters below
-	enum { EMITTER_BOX, EMITTER_LIFETIME, EMITTER_RAINDROP };
-	enum { AFFECTOR_GRAVITY, AFFECTOR_INTEGRATE, AFFECTOR_SURFACE_BOUNCE, AFFECTOR_AGE };
-	grain_archetype_t* archetype = grain_define_archetype(grain, "Rain", (grain_archetype_spec_t){
-		.emitters = (grain_emitter_t*[]){ box, lifetime, raindrop },
-		.num_emitters = 3,
-		// Bounce after integration so a drop never renders inside a platform
-		.affectors = (grain_affector_t*[]){ gravity, integrate, surface_bounce, age },
-		.num_affectors = 4,
-		.renderer = streak,
-	});
-	CHECK(archetype != NULL);
-
-	grain_archetype_info_t info = grain_inspect_archetype(archetype);
-	int surface_slot = info.affectors[AFFECTOR_SURFACE_BOUNCE].first_sampler;
-	CHECK(
-		info.affectors[AFFECTOR_SURFACE_BOUNCE].num_samplers == 1
-		&& strcmp(info.samplers[surface_slot].name, "surface") == 0
-	);
-
-	const float emission_rate = 900.f;
-	const float max_lifetime = 1.6f;
-	grain_pool_t* pool = grain_create_pool(grain, (grain_pool_opts_t){
-		.archetype = archetype,
-		.max_systems = 1,
-		.max_emission_rate = emission_rate,
-		.lifetime_budget = max_lifetime,
-		.max_burst_size = 0,
-	});
+	grain_blueprint_t* blueprint = grain_rain_load(grain);
+	CHECK(blueprint != NULL);
+	grain_pool_t* pool = grain_create_pool(grain, grain_blueprint_pool_opts(blueprint));
 	CHECK(pool != NULL);
 	grain_system_t* rain = grain_create_system(pool);
+	// Everything tuned in rain.json; only the values that depend on the
+	// window are set here
+	grain_blueprint_apply(blueprint, rain);
+	grain_destroy_blueprint(blueprint);
+
+	grain_set(rain, grain_rain.Box.position, cf_v2(0.f, world_max.y + 24.f));
+	grain_set(rain, grain_rain.Box.size, cf_v2(WINDOW_WIDTH + 300.f, 16.f));
+	grain_set(rain, grain_rain.SurfaceBounce.world_min, world_min);
+	grain_set(rain, grain_rain.SurfaceBounce.world_max, world_max);
 
 	float time = 0.f;
 	while (cf_app_is_running()) {
@@ -194,38 +150,10 @@ main(int argc, char* argv[]) {
 
 		// 2. Simulate
 		grain_begin_update(grain);
-
-		grain_set_emission_rate(rain, emission_rate);
-		grain_set_emitter_parameter(rain, EMITTER_BOX, "position", &(CF_V2){ 0.f, world_max.y + 24.f });
-		grain_set_emitter_parameter(rain, EMITTER_BOX, "size", &(CF_V2){ WINDOW_WIDTH + 300.f, 16.f });
-		grain_set_emitter_parameter(rain, EMITTER_LIFETIME, "min_lifetime", &(float){ 1.2f });
-		grain_set_emitter_parameter(rain, EMITTER_LIFETIME, "max_lifetime", &(float){ max_lifetime });
-		grain_set_emitter_parameter(rain, EMITTER_RAINDROP, "min_speed", &(float){ 520.f });
-		grain_set_emitter_parameter(rain, EMITTER_RAINDROP, "max_speed", &(float){ 720.f });
-		grain_set_emitter_parameter(rain, EMITTER_RAINDROP, "slant", &(float){ 0.18f });
-
-		grain_set_affector_parameter(rain, AFFECTOR_GRAVITY, "gravity", &(float){ 250.f });
-		grain_set_affector_parameter(rain, AFFECTOR_SURFACE_BOUNCE, "world_min", &world_min);
-		grain_set_affector_parameter(rain, AFFECTOR_SURFACE_BOUNCE, "world_max", &world_max);
-		grain_set_affector_parameter(rain, AFFECTOR_SURFACE_BOUNCE, "max_surface_speed", &(float){ MAX_SURFACE_SPEED });
-		grain_set_affector_parameter(rain, AFFECTOR_SURFACE_BOUNCE, "bounciness", &(float){ 0.3f });
-		grain_set_affector_parameter(rain, AFFECTOR_SURFACE_BOUNCE, "scatter", &(float){ 90.f });
-		grain_set_affector_parameter(rain, AFFECTOR_SURFACE_BOUNCE, "splash_lifetime", &(float){ 0.35f });
-
-		grain_set_renderer_parameter(rain, "thickness", &(float){ 1.6f });
-		grain_set_renderer_parameter(rain, "stretch", &(float){ 0.022f });
-		grain_set_renderer_parameter(rain, "max_length", &(float){ 26.f });
-		CF_Pixel color = cf_color_to_pixel(cf_make_color_rgba_f(0.68f, 0.8f, 1.f, 0.85f));
-		grain_set_renderer_parameter(rain, "color", &color.val);
-		grain_set_renderer_parameter(rain, "splash_angle", &(float){ 0.6f });
-		grain_set_renderer_parameter(rain, "splash_spread", &(float){ 110.f });
-		grain_set_renderer_parameter(rain, "splash_length", &(float){ 4.f });
-
-		grain_set_texture(pool, surface_slot, (grain_texture_binding_t){
+		grain_set(pool, grain_rain.SurfaceBounce.surface, (grain_texture_binding_t){
 			.texture = cf_canvas_get_target(surface),
 			.sampler = surface_sampler,
 		});
-
 		grain_tick(rain, dt);
 		grain_end_update(grain);
 
@@ -249,5 +177,7 @@ main(int argc, char* argv[]) {
 	return 0;
 }
 
-#define XINCBIN_IMPLEMENTATION
-#include "resources.rc"
+// The baked effect's data lives in this translation unit; the include at the
+// top only brought in the declarations and the typed handles
+#define GRAIN_EFFECT_IMPLEMENTATION
+#include <grain_rain.h>

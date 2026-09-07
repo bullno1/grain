@@ -1,0 +1,54 @@
+{
+	"grain_version": 1,
+	"name": "Rain",
+	"emission_rate": 900.0,
+	"pool": {
+		"max_systems": 1,
+		"max_emission_rate": 900.0,
+		"lifetime_budget": 1.6,
+		"max_burst_size": 0
+	},
+	"modules": [
+		{ "kind": "emitter", "name": "Box", "path": "../../modules/emitters/Box.glsl" },
+		{ "kind": "emitter", "name": "Lifetime", "path": "../../modules/emitters/Lifetime.glsl" },
+		{ "kind": "emitter", "name": "Raindrop", "path": "modules/Raindrop.glsl" },
+		{ "kind": "affector", "name": "Gravity", "path": "../../modules/affectors/Gravity.glsl" },
+		{ "kind": "affector", "name": "Integrate", "path": "../../modules/affectors/Integrate.glsl" },
+		{ "kind": "affector", "name": "SurfaceBounce", "path": "modules/SurfaceBounce.glsl" },
+		{ "kind": "affector", "name": "Age", "path": "../../modules/affectors/Age.glsl" },
+		{ "kind": "renderer", "name": "Streak", "path": "modules/Streak.glsl" }
+	],
+	"archetype": {
+		"emitters": [
+			{ "module": "Box" },
+			{ "module": "Lifetime", "params": { "min_lifetime": 1.2, "max_lifetime": 1.6 } },
+			{ "module": "Raindrop", "params": { "min_speed": 520.0, "max_speed": 720.0, "slant": 0.18 } }
+		],
+		"affectors": [
+			{ "module": "Gravity", "params": { "gravity": 250.0 } },
+			{ "module": "Integrate" },
+			{
+				"module": "SurfaceBounce",
+				"params": {
+					"max_surface_speed": 300.0,
+					"bounciness": 0.3,
+					"scatter": 90.0,
+					"splash_lifetime": 0.35
+				}
+			},
+			{ "module": "Age" }
+		],
+		"renderer": {
+			"module": "Streak",
+			"params": {
+				"thickness": 1.6,
+				"stretch": 0.022,
+				"max_length": 26.0,
+				"color": 3657419949,
+				"splash_angle": 0.6,
+				"splash_spread": 110.0,
+				"splash_length": 4.0
+			}
+		}
+	}
+}

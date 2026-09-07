@@ -3,3 +3,4 @@
 #define GRAIN_EFFECT_IMPLEMENTATION
 #include <grain_fire.h>
 #include <grain_snow.h>
+#include <grain_paths.h>
