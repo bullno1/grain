@@ -5,7 +5,6 @@
 #include <bgame/asset.h>
 #include <blog.h>
 #include <cute.h>
-#include <SDL3/SDL_video.h>
 #include <stdio.h>
 #include <dcimgui.h>
 
@@ -50,16 +49,6 @@ init(int argc, const char** argv) {
 		char assets_dir[1024];
 		snprintf(assets_dir, sizeof(assets_dir), "%sassets", cf_fs_get_base_directory());
 		cf_fs_mount(assets_dir, "/assets", true);
-#endif
-
-#ifdef __EMSCRIPTEN__
-		// SDL's Emscripten backend adopts the CSS-driven canvas size at creation
-		// but never emits SDL_EVENT_WINDOW_RESIZED for it, so CF's cached
-		// app->w/h would stay at the requested size. Push the real size back
-		// through cf_app_set_size to synthesize that event.
-		int window_width, window_height;
-		SDL_GetWindowSize(cf_app_get_window(), &window_width, &window_height);
-		cf_app_set_size(window_width, window_height);
 #endif
 
 		cf_app_init_imgui();

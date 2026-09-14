@@ -14,11 +14,12 @@ All build scripts accept `BUILD_TYPE` (default `RelWithDebInfo`) and `RELOADABLE
 
 - Build (Linux): `cmd/linux/build`
 - Run editor: `cmd/linux/run` (launches `grain-editor` under gdb)
-- Rebuild on file change: `cmd/linux/watch` (inotify loop over `editor`, `deps`, `lib`, `tests`)
+- Rebuild on file change: `cmd/linux/watch` (inotify loop over the `WATCH_DIRS` in `bgame.env`)
 - Tests: `cmd/linux/build && cmd/linux/test`
 - Single test: pass exact suite name, optionally exact test name, to the test binary:
   `bin/linux/RelWithDebInfo-reloadable/grain-tests <suite> [test]`
   (e.g. `grain-tests decorator/scanner`)
+- `cmd` is a symlink to `deps/bgame/cmd`; the scripts are shared across projects and read the executable names from `bgame.env` at the root. Toolchain files live in `deps/bgame/cmake/`, project-specific CMake helpers in `cmake/`.
 - Web: `cmd/web/build` (emscripten; forces `RELOADABLE=OFF`, tests are excluded). Windows: `cmd/win/prepare.bat` then `cmd/win/build.bat`, tests via `cmd/win/test.bat`. Steam Runtime: `cmd/steamrt/*` (`cmd/steamrt/test` runs the tests inside the SDK container).
 
 CMake exports `compile_commands.json` into `.build/<platform>/<config>/`.
