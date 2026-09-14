@@ -299,7 +299,7 @@ bco_static(
 	const char* question,
 	const char* yes,
 	const char* no,
-	const char* cancel,
+	const char* cancel
 ) {
 	bco_vars(
 		modal_prompt_result_t result;
