@@ -293,14 +293,17 @@ show_error(const char* error) {
 }
 
 bco_static(
+	modal_prompt_result_t,
 	modal_prompt,
 	const char* title,
 	const char* question,
 	const char* yes,
 	const char* no,
 	const char* cancel,
-	modal_prompt_result_t* result
 ) {
+	bco_vars(
+		modal_prompt_result_t result;
+	)
 	bco_yield_points(
 		WAIT_FOR_ANSWER
 	)
@@ -314,7 +317,7 @@ bco_static(
 	bco_arg(no) = bgame_arena_strcpy(&modal_arena, bco_arg(no));
 	bco_arg(cancel) = bgame_arena_strcpy(&modal_arena, bco_arg(cancel));
 
-	*bco_arg(result) = MODAL_PROMPT_RESULT_CANCEL;
+	bco_var(result) = MODAL_PROMPT_RESULT_CANCEL;
 	ImGui_OpenPopup(bco_arg(title), 0);
 
 	while (ImGui_BeginPopupModal(
@@ -325,19 +328,19 @@ bco_static(
 		ImGui_Text("%s", bco_arg(question));
 
 		if (ImGui_Button(bco_arg(yes))) {
-			*bco_arg(result) = MODAL_PROMPT_RESULT_YES;
+			bco_var(result) = MODAL_PROMPT_RESULT_YES;
 			ImGui_CloseCurrentPopup();
 		}
 
 		ImGui_SameLine();
 		if (ImGui_Button(bco_arg(no))) {
-			*bco_arg(result) = MODAL_PROMPT_RESULT_NO;
+			bco_var(result) = MODAL_PROMPT_RESULT_NO;
 			ImGui_CloseCurrentPopup();
 		}
 
 		ImGui_SameLine();
 		if (ImGui_Button(bco_arg(cancel))) {
-			*bco_arg(result) = MODAL_PROMPT_RESULT_CANCEL;
+			bco_var(result) = MODAL_PROMPT_RESULT_CANCEL;
 			ImGui_CloseCurrentPopup();
 		}
 
@@ -346,10 +349,12 @@ bco_static(
 		bco_at(WAIT_FOR_ANSWER) bco_yield();
 	}
 
+	bco_return(bco_var(result));
+
 	bco_end
 }
 
-bco_static(show_about) {
+bco_static(void, show_about) {
 	bco_yield_points(BCO_WAIT_POPUP);
 
 	bco_begin
@@ -512,7 +517,7 @@ static const ufa_filter_t image_file_filters[] = {
 	{ .name = "All files", .pattern = "*" },
 };
 
-bco_static(import_module) {
+bco_static(void, import_module) {
 	bco_vars(
 		ufa_open_file_t* open_file;
 	)
@@ -755,7 +760,7 @@ apply_texture_bindings(grain_archetype_info_t* archetype_info) {
 	);
 }
 
-bco_static(pick_texture, const char* binding_key) {
+bco_static(void, pick_texture, const char* binding_key) {
 	bco_vars(
 		ufa_open_file_t* open_file;
 	)
@@ -1487,8 +1492,8 @@ save_texture_path(
 
 // Save to current_file_ref without a dialog when one is held ("Save"), or
 // always through a dialog when force_dialog is set ("Save as").
-// Success is left in save_flow_succeeded for chained flows.
-bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
+// Return whether saving was successful.
+bco_static(bool, do_save_system, bool force_dialog) {
 	bco_vars(
 		ufa_save_file_t* save_file;
 	)
@@ -1497,10 +1502,6 @@ bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
 	)
 
 	bco_begin
-
-	if (bco_arg(save_succeeded) != NULL) {
-		*bco_arg(save_succeeded) = false;
-	}
 
 	begin_native_modal();
 
@@ -1520,10 +1521,10 @@ bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
 	}
 
 	ufa_status_t save_status = ufa_check_save_file(bco_var(save_file));
-	if (save_status == UFA_CANCELLED) { bco_return(); }
+	if (save_status == UFA_CANCELLED) { bco_return(false); }
 	if (save_status == UFA_ERROR) {
 		show_error(ufa_get_save_file_error(bco_var(save_file)));
-		bco_return();
+		bco_return(false);
 	}
 
 	grain_blueprint_t* snapshot = grain_snapshot_system(
@@ -1539,7 +1540,7 @@ bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
 	);
 	if (snapshot == NULL) {
 		show_error(grain_get_last_error(grain));
-		bco_return();
+		bco_return(false);
 	}
 	if (has_bounds) {
 		grain_blueprint_set_bounds(snapshot, bounds);
@@ -1579,13 +1580,10 @@ bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
 
 		unsaved_changes = false;
 
-		if (bco_arg(save_succeeded) != NULL) {
-			*bco_arg(save_succeeded) = true;
-		}
-
 		remember_directory(&last_system_path, file_path);
 		BLOG_INFO("Saved system to %s", file_path);
 	}
+	bco_return(write_ok);
 
 	bco_end
 
@@ -1593,40 +1591,42 @@ bco_static(do_save_system, bool force_dialog, bool* save_succeeded) {
 	end_native_modal();
 }
 
-bco_static(maybe_save_changes, bool* should_continue) {
+bco_static(bool, maybe_save_changes) {
 	bco_vars(
 		modal_prompt_result_t prompt_result;
+		bool should_continue;
 	)
 
 	bco_yield_points(WAIT_FOR_PROMPT, WAIT_FOR_SAVE)
 
 	bco_begin
 
-	*bco_arg(should_continue) = true;
+	bco_var(should_continue) = true;
+
 	if (unsaved_changes) {
-		bco_at(WAIT_FOR_PROMPT) bco_call(modal_prompt,
+		bco_at(WAIT_FOR_PROMPT) bco_call_result(prompt_result, modal_prompt,
 			.title = "Unsaved changes",
 			.question = bgame_arena_fmt(&modal_arena, "Save changes to %s?", system_name.data),
 			.yes = "Save",
 			.no = "Don't save",
 			.cancel = "Cancel",
-			.result = &bco_var(prompt_result),
 		);
 
 		if (bco_var(prompt_result) == MODAL_PROMPT_RESULT_YES) {
 			// If yes, continue if save succeeded
-			bco_at(WAIT_FOR_SAVE) bco_call(do_save_system,
+			bco_at(WAIT_FOR_SAVE) bco_call_result(should_continue, do_save_system,
 				.force_dialog = false,
-				.save_succeeded = bco_arg(should_continue),
 			);
 		} else if (bco_var(prompt_result) == MODAL_PROMPT_RESULT_NO) {
 			// If no, continue
-			*bco_arg(should_continue) = true;
+			bco_var(should_continue) = true;
 		} else {
 			// If cancelled, do not continue
-			*bco_arg(should_continue) = false;
+			bco_var(should_continue) = false;
 		}
 	}
+
+	bco_return(bco_var(should_continue));
 
 	bco_end
 }
@@ -1695,7 +1695,7 @@ reset_editor_system(void) {
 	BLOG_INFO("Created a new system");
 }
 
-bco_static(new_system) {
+bco_static(bool, new_system) {
 	bco_vars(
 		bool should_continue;
 	)
@@ -1706,10 +1706,12 @@ bco_static(new_system) {
 
 	bco_begin
 
-	bco_at(WAIT_FOR_SAVE) bco_call(maybe_save_changes, &bco_var(should_continue));
-	if (!bco_var(should_continue)) { bco_return(); }
+	bco_at(WAIT_FOR_SAVE) bco_call_result(should_continue, maybe_save_changes);
+	if (!bco_var(should_continue)) { bco_return(false); }
 
 	reset_editor_system();
+
+	bco_return(true);
 
 	bco_end
 }
@@ -1864,7 +1866,7 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 	return true;
 }
 
-bco_static(open_system) {
+bco_static(void, open_system) {
 	bco_vars(
 		ufa_open_file_t* open_file;
 		bool start_process;
@@ -1876,7 +1878,7 @@ bco_static(open_system) {
 
 	bco_begin
 
-	bco_at(WAIT_FOR_SAVE) bco_call(maybe_save_changes, &bco_var(start_process));
+	bco_at(WAIT_FOR_SAVE) bco_call_result(start_process, maybe_save_changes);
 	if (!bco_var(start_process)) { bco_return(); }
 
 	begin_native_modal();
