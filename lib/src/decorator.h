@@ -11,10 +11,9 @@ typedef struct {
 	int num_args;
 } grain_decorator_t;
 
-// Parses `@name(args)` decorators out of the Params and Samplers blocks of
-// `source`, blanking them with spaces in place so the source stays a valid
-// module with unchanged line numbers. Appends to the two arrays; args of one
-// decorator are contiguous at [first_arg, first_arg + num_args).
+// Parses `@name(args)` decorators out of the Params and Samplers blocks,
+// blanking them in place so line numbers are unchanged. Args of one decorator
+// are contiguous at [first_arg, first_arg + num_args).
 bool
 grain_decorator_extract(
 	grain_t* grain,

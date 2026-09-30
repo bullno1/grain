@@ -6,9 +6,8 @@ static btest_suite_t archetype = {
 	.cleanup_per_test = test_grain_cleanup,
 };
 
-// Full archetype composition, headless: the generated update and render
-// shaders compile through cute-spirv for both the desktop and the web (GLES)
-// variants; only the GPU shader objects are skipped (grain_t::headless).
+// Full archetype composition, headless: the generated shaders compile through
+// cute-spirv for both desktop and GLES, only the GPU shader objects are skipped
 
 static const char* emitter_src =
 	"Emitter(NoisePoint)\n"
@@ -370,9 +369,8 @@ BTEST(archetype, sdf_builtins) {
 }
 
 BTEST(archetype, texture_smooth_builtin) {
-	// texture_smooth takes the renamed sampler slot as a function argument and
-	// reads its size with textureSize; both must survive full archetype
-	// composition on the desktop and web targets
+	// texture_smooth takes the renamed sampler slot as an argument and reads
+	// its size with textureSize; both must survive composition on both targets
 	grain_renderer_t* renderer = grain_define_renderer(
 		test_grain(),
 		"Renderer(PixelSprite)\n"
@@ -412,10 +410,8 @@ BTEST(archetype, texture_smooth_builtin) {
 	BTEST_ASSERT_EX(archetype != NULL, "%s", grain_get_last_error(test_grain()));
 }
 
-// A 3D archetype: vec3 attributes through the vec3 helper overloads, and a
-// billboarded renderer over grain_transform3d/grain_projection. Both the
-// inspect stub (module definition) and the composed shaders must resolve the
-// transform builtins, for the desktop and GLES variants alike.
+// A 3D archetype: vec3 attributes and a billboarded renderer. Both the inspect
+// stub and the composed shaders must resolve the transform builtins.
 BTEST(archetype, composes_3d) {
 	grain_emitter_t* emitter = grain_define_emitter(
 		test_grain(),

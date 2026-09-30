@@ -6,17 +6,10 @@ set(GRAINC_EXECUTABLE "" CACHE FILEPATH
 
 # grain_compile_effect(<input.json> <name> <output.h> [extra grainc flags...])
 #
-# Adds a custom command producing <output.h> from <input.json> with the effect
-# named <name> (symbols become grain_<name>_*). List <output.h> in a target's
-# sources to hook up the dependency.
-#
-# Modules the effect references by `path` (without an embedded `source`) are
-# read by grainc relative to the .json and tracked through a depfile, so
-# editing one of those .glsl files re-bakes the header.
-#
-# The command names the grainc target, so when the build is cross-compiled
-# (emscripten) CMake runs it through CMAKE_CROSSCOMPILING_EMULATOR, i.e. node
-# for the wasm grainc. GRAINC_EXECUTABLE bypasses that with any prebuilt tool.
+# Bakes <output.h> from <input.json>; list <output.h> in a target's sources.
+# Modules referenced by `path` are tracked through a depfile. Naming the grainc
+# target lets CMAKE_CROSSCOMPILING_EMULATOR run the wasm build under node;
+# GRAINC_EXECUTABLE substitutes any prebuilt tool.
 function (grain_compile_effect INPUT NAME OUTPUT)
 	if (GRAINC_EXECUTABLE)
 		set(GRAINC_CMD "${GRAINC_EXECUTABLE}")

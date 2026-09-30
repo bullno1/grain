@@ -18,9 +18,8 @@ typedef struct {
 	grainc_target_mask_t targets;
 } grainc_args_t;
 
-// Module sources read from disk for modules that reference a `path` without
-// embedding a `source`. The JSON doc borrows them, so they live until the
-// blueprint has been loaded; the paths feed the depfile.
+// Sources read from disk for path-only modules. The JSON doc borrows them, so
+// they live until the blueprint is loaded; the paths feed the depfile.
 typedef struct {
 	char** contents;
 	char** paths;
@@ -249,10 +248,8 @@ grainc_resolved_free(grainc_resolved_t* resolved) {
 	*resolved = (grainc_resolved_t){ 0 };
 }
 
-// Fills in `source` for every module that only names a `path`. The library
-// never resolves paths itself, so the effect file is completed here, before
-// it is handed over as a blueprint. Modules carrying a `source` are left
-// alone: an embedded snapshot wins over the file it was saved from
+// Fill in `source` for path-only modules; the library never resolves paths.
+// An embedded `source` wins over the file it was saved from.
 static bool
 grainc_resolve_module_sources(
 	CF_JDoc doc,

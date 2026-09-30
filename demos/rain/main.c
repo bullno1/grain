@@ -1,11 +1,5 @@
-// Rain demo: a box emitter along the top rains streaks onto moving platforms.
-// The platforms are drawn into an offscreen canvas that doubles as a collision
-// surface: a SurfaceBounce affector samples it, bounces drops off it and turns
-// each upward bounce into a short-lived V-shaped splash.
-//
-// The effect is baked from rain.json by grainc: the archetype loads from
-// precompiled bytecode, tuned values come from the file, and params are
-// addressed through the generated typed handles.
+// Rain demo: drops fall onto moving platforms drawn into an offscreen canvas
+// that doubles as the collision surface sampled by SurfaceBounce.
 #include <cute.h>
 #include <grain_rain.h>
 #include <math.h>
@@ -107,9 +101,8 @@ main(int argc, char* argv[]) {
 	CF_V2 world_min = cf_v2(-WINDOW_WIDTH * 0.5f, -WINDOW_HEIGHT * 0.5f);
 	CF_V2 world_max = cf_v2(WINDOW_WIDTH * 0.5f, WINDOW_HEIGHT * 0.5f);
 
-	// The collision surface covers the whole world at screen resolution.
-	// Its clear color is "empty, at rest" so filtered edges blend toward zero
-	// velocity rather than toward a bogus one
+	// Clear color is "empty, at rest" so filtered edges blend toward zero
+	// velocity rather than a bogus one
 	CF_Canvas surface = cf_make_canvas(cf_canvas_defaults(WINDOW_WIDTH, WINDOW_HEIGHT));
 	cf_canvas_set_clear_color(surface, cf_make_color_rgba_f(0.5f, 0.5f, 0.f, 0.f));
 	CF_SamplerParams sampler_params = cf_sampler_defaults();

@@ -183,9 +183,8 @@ grain_dsl_compile_for_cf(
 		memcpy(msl_src, r.msl, msl_src_size + 1);
 	}
 
-	// Reflection: map CSPV_Reflection to CF_ShaderInfo. Arrays are cf_alloc'd (freed by
-	// cute_shader_free_result); names are interned strings from the compiler, which
-	// are immortal -- no copies, and free_result must not free them.
+	// Names are interned strings from the compiler and immortal: no copies, and
+	// cute_shader_free_result must not free them
 	CSPV_Reflection* rf = &r.reflection;
 
 	int num_samplers = (int)asize(rf->samplers);
@@ -320,10 +319,8 @@ grain_dsl_parse_module(
 	CSPV_Stage stage,
 	CK_DYNA const char** samplers
 ) {
-	// The module body references its samplers by their local names, so the
-	// inspect compile declares them up front. Bindings 8+ stay clear of the
-	// grain_Inspect_* dummy blocks; the uvrect global stands in for the slot's
-	// UV rect the archetype composition provides.
+	// Declare the module's samplers under their local names. Bindings 8+ stay
+	// clear of the grain_Inspect_* dummy blocks.
 	const char* prelude_fmt =
 		"layout(set = 0, binding = %d) uniform sampler2D %s;\n"
 		"vec4 %s_uvrect;\n";

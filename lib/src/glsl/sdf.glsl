@@ -1,6 +1,5 @@
-// 2D signed distance helpers. Negative = inside.
-// Composites made with min/max are exact on the boundary but only lower bounds
-// inside; irrelevant for sdf_mask fills, matters for interior glow gradients.
+// 2D signed distance helpers, negative = inside. min/max composites are only
+// lower bounds inside, which matters for interior glow gradients
 
 float sd_circle(vec2 p, float r) {
 	return length(p) - r;
@@ -60,11 +59,8 @@ vec2 tf_scale(vec2 p, float s) { return p / s; }
 
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
 
-// World-space offset of this quad corner for a shape spanning ±half_extent.
-// Assign to a varying and reuse in gl_Position:
-//   v_p = sdf_quad(vec2(radius));
-//   gl_Position = grain_transform * vec4(particle.position + v_p, 0.0, 1.0);
-// Pad half_extent by the softness when using the soft sdf_mask.
+// Corner offset for a shape spanning ±half_extent; assign to a varying and
+// reuse in gl_Position. Pad by the softness when using the soft sdf_mask.
 vec2 sdf_quad(vec2 half_extent) {
 	return quad() * 2.0 * half_extent;
 }

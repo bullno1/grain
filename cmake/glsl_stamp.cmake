@@ -1,6 +1,5 @@
-# Writes a header whose content changes whenever any embedded glsl changes.
-# dsl.c includes it so compiler caches (ccache) see incbin'd content updates,
-# which never appear in the preprocessed source on their own.
+# Header that changes whenever any embedded glsl changes, so ccache sees
+# incbin'd content updates that never appear in the preprocessed source.
 file(GLOB files "${DIR}/*.glsl")
 set(stamp "// Generated; do not edit\n")
 foreach(f ${files})

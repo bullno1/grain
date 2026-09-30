@@ -9,10 +9,8 @@ static btest_suite_t baked_codegen = {
 	.cleanup_per_test = test_grain_cleanup,
 };
 
-// Consumes the headers grainc bakes from samples/ at build time. This TU has
-// no implementation macro: linking proves the single-header contract
-// (declarations everywhere, data in the one TU that defines
-// GRAIN_EFFECT_IMPLEMENTATION -- see baked_codegen_impl.c).
+// Consumes the headers grainc bakes from samples/. This TU has no
+// implementation macro: linking proves the single-header contract.
 
 BTEST(baked_codegen, fire_loads) {
 	grain_blueprint_t* blueprint = grain_fire_load(test_grain());

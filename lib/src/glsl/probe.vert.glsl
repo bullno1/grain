@@ -1,17 +1,12 @@
-// Probe pass entry point: the render stage with every view transform set to
-// identity, writing each particle's corners into a readback canvas instead of
-// the screen. See grain_probe_system.
-//
-// A slot is a column of GRAIN_PROBE_ROWS float texels, one per quad corner:
-// xyz its position in world space, w the particle's age, negative when the
-// slot holds nothing the renderer would draw.
+// Probe pass: the render stage with identity view transforms, writing each
+// slot as a column of GRAIN_PROBE_ROWS texels, one per quad corner: xyz world
+// position, w age, negative when the slot draws nothing
 #define GRAIN_PROBE 1
 #include "grain/api.glsl"
 #include "archetype/render.glsl"
 
-// Location 14: reserved for grain, see render.vert.glsl. The module's own
-// Varying() outputs are declared but never consumed; the probe fragment stage
-// reads only this.
+// Reserved location; the probe fragment stage reads only this, the module's
+// own Varying() outputs are never consumed
 layout(location = 14) flat out vec4 grain_v_probe;
 
 #define GRAIN_PROBE_ROWS 4
@@ -48,18 +43,15 @@ void main() {
 	if (sch.started) {
 		cull();
 		process(particle, params, ctx);
-		// cull() leaves w at zero; anything else is what the renderer would
-		// have rasterized, already in world space since the view transforms
-		// are identity
+		// cull() leaves w at zero; anything else is already in world space
 		if (gl_Position.w != 0.0) {
 			probe = vec4(gl_Position.xyz / gl_Position.w, sch.age);
 		}
 	}
 	grain_v_probe = probe;
 
-	// Cover texel (lid, corner) of the pool_size x GRAIN_PROBE_ROWS canvas with
-	// one triangle. Legs of 1.5 texels from the texel's corner take in its
-	// center and no neighbour's.
+	// One triangle covering texel (lid, corner): legs of 1.5 texels take in its
+	// center and no neighbour's
 	vec2 texel_size = vec2(2.0 / float(grain_pool_size), 2.0 / float(GRAIN_PROBE_ROWS));
 	vec2 origin = vec2(-1.0, -1.0) + vec2(float(lid), float(corner)) * texel_size;
 	vec2 leg = vec2(

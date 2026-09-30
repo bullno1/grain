@@ -27,10 +27,8 @@ typedef uint32_t grainc_target_mask_t;
 #define GRAINC_TARGET_ALL (GRAINC_TARGET_DESKTOP | GRAINC_TARGET_WEB)
 
 /**
- * Print a baked effect as an stb-style single-header C module.
- *
- * `prefix` names every external symbol (`<prefix>_effect`, `<prefix>`,
- * `<prefix>_load`) and, uppercased, the implementation guard.
+ * Print a baked effect as an stb-style single-header C module. `prefix` names
+ * every external symbol and, uppercased, the implementation guard.
  */
 void
 grainc_emit_header(

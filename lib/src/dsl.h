@@ -38,9 +38,8 @@ typedef struct {
 } grain_dsl_archetype_shaders_t;
 
 /**
- * Everything the probe pass needs to compile the render stage again later,
- * snapshotted at archetype definition so it matches the running render shader
- * even if the renderer module is redefined in between. All owned copies.
+ * Snapshot of what the probe pass needs to recompile the render stage later,
+ * taken at archetype definition so a renderer redefinition cannot desync it.
  */
 typedef struct {
 	char* renderer_name;
@@ -50,9 +49,8 @@ typedef struct {
 	char* render_source;
 } grain_dsl_probe_sources_t;
 
-// `samplers` (scanned from the Samplers block, not owned) is declared to the
-// inspect compile so the module body can reference them, and reflected sampler
-// declarations outside the list are rejected.
+// `samplers` (not owned) are declared to the inspect compile; reflected
+// sampler declarations outside the list are rejected
 grain_dsl_module_info_t*
 grain_dsl_parse_module(
 	grain_t* grain,
@@ -74,8 +72,7 @@ grain_dsl_compile_archetype(
 
 /**
  * Compile the probe variant of the render stage into `out->probe_*`.
- *
- * Headless mode skips the GPU shader object, like grain_dsl_compile_archetype.
+ * Headless mode skips the GPU shader object.
  */
 bool
 grain_dsl_compile_probe(

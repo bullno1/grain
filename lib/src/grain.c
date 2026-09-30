@@ -150,9 +150,8 @@ grain_analyze_module(grain_t* grain, const char* source, char** stripped_out) {
 		grain_dsl_free_module_info(vsh_info);
 	}
 
-	// A sampler is renamed to its slot's global with `#define`, which rewrites
-	// every token of that name: a param or attribute sharing it would be
-	// silently rewritten too.
+	// Samplers are renamed with `#define`, which would silently rewrite a param
+	// or attribute sharing the name too
 	for (int i = 0; i < asize(samplers); ++i) {
 		for (int j = 0; j < asize(module_info->module_params); ++j) {
 			if (module_info->module_params[j].name == samplers[i]) {
@@ -832,9 +831,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		goto fail;
 	}
 
-	// Slots for every module's Samplers block, in canonical order: emitters,
-	// affectors, renderer. They follow the attribute textures because CF needs
-	// sampler bindings dense from 0 with storage buffers after all samplers.
+	// Sampler slots in canonical module order, after the attribute textures:
+	// CF needs sampler bindings dense from 0 with storage buffers after them
 	int num_user_samplers = 0;
 	for (int i = 0; i < spec.num_emitters; ++i) {
 		num_user_samplers += asize(((grain_module_t*)spec.emitters[i])->info->samplers);
@@ -850,9 +848,8 @@ grain_define_archetype(grain_t* grain, const char* name, grain_archetype_spec_t 
 		goto fail;
 	}
 
-	// User-visible sampler declarations: every stage declares every slot so the
-	// storage buffer bindings stay identical across passes; unused slots are
-	// simply fed the fallback texture.
+	// Every stage declares every slot so storage buffer bindings stay identical
+	// across passes; unused slots get the fallback texture
 	for (int j = 0; j < num_user_samplers; ++j) {
 		sfmt_append(
 			archetype_attrs,
@@ -1532,9 +1529,8 @@ grain_capture_samplers(grain_archetype_t* archetype) {
 	return bindings;
 }
 
-// Rebinds every sampler slot on the pool material. Every declared slot must
-// be fed (CF asserts on a missing one) so unbound slots get the fallback.
-// Material entries persist across passes; nothing per-frame happens here.
+// Rebinds every sampler slot on the pool material; CF asserts on a missing
+// one, so unbound slots get the fallback
 static void
 grain_apply_sampler_bindings(grain_pool_t* pool) {
 	int num_samplers = asize(pool->sampler_bindings);
@@ -1628,10 +1624,8 @@ grain_reconcile_pool(grain_pool_t* pool) {
 	pool->update_layout = new_update;
 	pool->render_layout = new_render;
 
-	// Migrate sampler bindings by (module, name): a dropped slot loses its
-	// binding, a re-added one starts on the fallback. Re-apply unconditionally
-	// since slot numbering may have shifted; stale grain_sampler_<j> entries on
-	// the material are ignored by CF.
+	// Migrate sampler bindings by (module, name). Re-apply unconditionally since
+	// slot numbering may have shifted; CF ignores stale material entries.
 	CK_DYNA grain_pool_sampler_t* new_samplers = grain_capture_samplers(archetype);
 	for (int i = 0; i < asize(new_samplers); ++i) {
 		for (int j = 0; j < asize(pool->sampler_bindings); ++j) {
@@ -1811,9 +1805,8 @@ grain_touch(grain_pool_t* pool) {
 
 void
 grain_begin_update(grain_t* grain) {
-	// A pool queued outside a begin/end window (e.g. grain_burst before the first
-	// begin) would keep its queued flag while the list is dropped, starving it
-	// forever; unflag before dropping.
+	// A pool queued outside a begin/end window would keep its queued flag while
+	// the list is dropped, starving it forever
 	for (grain_pool_t* itr = grain->update_list; itr != NULL;) {
 		grain_pool_t* next = itr->update_next;
 		itr->update_next = NULL;

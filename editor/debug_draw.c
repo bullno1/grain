@@ -51,9 +51,7 @@ typedef struct {
 	int num_refs;
 } gizmo_t;
 
-// An in-progress drag. Interaction runs during the UI pass (see
-// debug_draw_param) so a write lands in the same frame's grain_end_update;
-// the state carries what the grab decided over to the following frames.
+// An in-progress drag: what the grab decided, carried over to following frames.
 typedef enum {
 	DRAG_NONE,
 	DRAG_POSITION_2D,     // 2D view: the mouse maps straight to the plane
@@ -126,14 +124,8 @@ add_ref(gizmo_t* gizmo, int param_index) {
 	}
 }
 
-/**
- * Resolve an argument that is either a number literal or a reference to a
- * sibling float param.
- *
- * Returns false when the argument is present but cannot be resolved: the
- * caller should drop the whole gizmo. An absent argument succeeds with
- * *found = false so the caller can substitute a default.
- */
+// Resolve a number literal or sibling float param reference. False when the
+// argument is present but unresolvable; absent succeeds with *found = false.
 static bool
 resolve_scalar(
 	const resolve_ctx_t* ctx,
@@ -169,13 +161,8 @@ resolve_scalar(
 	}
 }
 
-/**
- * Resolve an argument that must reference a sibling vec3 or vec2 param.
- *
- * A vec2 is lifted onto the XY plane at z = 0. Returns false when the
- * argument is present but cannot be resolved; an absent argument succeeds
- * with *found = false.
- */
+// Resolve a sibling vec3 or vec2 param reference, lifting a vec2 onto the XY
+// plane. Same return convention as resolve_scalar.
 static bool
 resolve_point(
 	const resolve_ctx_t* ctx,
@@ -238,10 +225,8 @@ drop_gizmo(gizmo_t* gizmo) {
 }
 
 // Picking {{{
-//
-// Everything here assumes the draw3d camera stacks are pushed for the frame.
-// Handles are hit-tested in the 2D draw space, where the identity camera
-// makes a unit a pixel, so radii are pixel sizes at any depth.
+// Assumes the draw3d camera stacks are pushed. Handles are hit-tested in 2D
+// draw space, so radii are pixel sizes at any depth.
 
 static CF_V2
 mouse_2d(void) {
@@ -632,9 +617,8 @@ register_direction(
 	if (current_view == GRAIN_VIEW_3D) {
 		CF_V3 axis = cf_safe_norm_v3(cf_v3(value[0], value[1], value[2]));
 		if (dragging(DRAG_DIRECTION, param_index)) {
-			// The tip rides the sphere of the arrow's length. Past the
-			// silhouette the ray misses: slide on the camera-facing plane
-			// through the current tip instead and fall back onto the sphere.
+			// Past the silhouette the ray misses the sphere: slide on the
+			// camera-facing plane through the tip and project back onto it
 			CF_Ray3 ray = mouse_ray();
 			CF_V3 hit;
 			bool hit_found = false;
@@ -810,11 +794,7 @@ polar(CF_V2 origin, float angle, float radius) {
 	};
 }
 
-/**
- * Outline of an annular sector in the XY plane: the outer arc from -> to,
- * then back along the inner arc (or through the apex when the sector starts
- * at the anchor), closed into a loop. Returns the point count.
- */
+// Closed outline of an annular sector in the XY plane; returns the point count
 static int
 sector_outline(CF_V2 at, float from, float to, float inner, float outer, CF_V2* points) {
 	if (outer < inner) {

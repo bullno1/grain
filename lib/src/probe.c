@@ -1,6 +1,5 @@
-// The probe pass: the render stage re-run with identity view transforms into
-// a small float canvas, one column of texels per slot, then read back. See
-// probe.vert.glsl for the GPU side and grain.h for the contract.
+// The probe pass: the render stage re-run with identity view transforms into a
+// small canvas, one column of texels per slot, then read back
 #include "internal.h"
 #include <float.h>
 #include <math.h>
@@ -13,9 +12,8 @@
 struct grain_probe_s {
 	grain_t* grain;
 
-	// The draw is recorded into the frame's command buffer at capture; the
-	// copy out is a separate submission on the SDL_GPU backends, so it is
-	// issued on the first poll, once the caller has presented that frame
+	// The copy out is a separate submission on SDL_GPU, so it is issued on the
+	// first poll, after the caller has presented the capturing frame
 	CF_Canvas canvas;
 	CF_Readback readback;
 	bool readback_started;
@@ -131,9 +129,8 @@ grain_probe_system(grain_system_t* system) {
 	cf_apply_mesh(grain->dummy_mesh);
 	grain_bind_pool_textures(pool);
 
-	// Both transform families at identity: whichever the renderer goes
-	// through, its clip output is then the world position it fed in. The
-	// system's own transform stays in effect, exactly as in a render pass.
+	// Both transform families at identity so clip output is world position;
+	// the system's own transform stays in effect
 	CF_M4x4 identity = cf_m4_identity();
 	const char* view_uniforms[] = { "grain_transform", "grain_transform3d", "grain_projection" };
 	for (int i = 0; i < (int)CF_ARRAY_SIZE(view_uniforms); ++i) {
@@ -175,10 +172,7 @@ grain_probe_system(grain_system_t* system) {
 }
 
 
-// Issues the copy out on the first poll. The caller polls after presenting
-// the frame that drew the probe, so on the SDL_GPU backends, where the copy is
-// its own submission, it lands behind the draw; the GLES path copies
-// synchronously either way.
+// Issues the copy out on the first poll, which lands behind the presented draw
 static void
 grain_probe_start_readback(grain_probe_t* probe) {
 	if (probe->readback_started) { return; }

@@ -169,15 +169,13 @@ void
 grain_cleanup_pool_probe(grain_pool_t* pool);
 
 struct grain_s {
-	// Set only by the headless tests (which build this struct by hand):
-	// archetype definition then compiles all shaders on the CPU but skips the
-	// GPU shader objects, so the full codegen is verifiable without a GPU.
+	// Set by the headless tests: shaders compile on the CPU but the GPU shader
+	// objects are skipped
 	bool headless;
 
 	CF_Mesh dummy_mesh;
-	// Bound to every sampler slot without a user texture: CF requires all
-	// declared samplers fed. Opaque white, so unbound slots multiply to a
-	// visible tint instead of silently rendering nothing.
+	// Bound to every sampler slot without a user texture. Opaque white, so
+	// unbound slots tint instead of silently rendering nothing.
 	CF_Texture fallback_texture;
 	CF_Arena arena;
 	const char* last_error;
@@ -207,11 +205,9 @@ void
 grain_cleanup_archetype(grain_archetype_t* archetype);
 
 /**
- * Find-or-recycle the archetype registered under `interned_name` (must be
- * sintern'ed). An existing archetype is cleaned up in place so pools can
- * reconcile against the bumped revision; a new one is uninitialized. Either
- * way the caller must fully (re)initialize the struct, with `*out_revision`
- * as its revision.
+ * Find-or-recycle the archetype under `interned_name`. An existing one is
+ * cleaned up in place; either way the caller must fully (re)initialize the
+ * struct with `*out_revision` as its revision.
  */
 grain_archetype_t*
 grain_upsert_archetype(grain_t* grain, const char* interned_name, uint32_t* out_revision);

@@ -12,9 +12,8 @@
 #define GRAIN_SAFETY   64.0
 #define GRAIN_DT_CLAMP 0.05        // ignore tab-switch / breakpoint spikes
 
-// Longest lifetime budget whose generations still resolve as a 32-bit float. `elapsed`
-// must keep one frame step representable, and wrapping needs room for a whole period
-// beyond the period itself -- hence the halving. Checked by grain_create_pool.
+// Longest lifetime budget whose generations still resolve as a 32-bit float;
+// halved because wrapping needs room for a whole period beyond the period itself
 #define GRAIN_MAX_LIFETIME_BUDGET \
 	(((GRAIN_DT_MIN / GRAIN_SAFETY) * (double)(1u << 23)) * 0.5)
 
@@ -27,20 +26,16 @@ typedef struct {
 	double   emitted;       // particles emitted so far, fractional
 	double   pending_burst; // burst particles queued since the last upload
 
-	// Snapshot taken at the last upload. The GPU's window is [synced, current), so
-	// several ticks between update passes fold into one window instead of the last
-	// tick overwriting the others.
+	// Snapshot at the last upload: the GPU's window is [synced, current), so
+	// several ticks between update passes fold into one window
 	double   elapsed_synced;
 	double   emitted_synced;
 	double   wrap_pending;  // total `elapsed` shift since the last upload
 } grain_particle_clock_t;
 
-// What the GPU receives per system. A whole number of vec4s wide so the GLES path
-// can carry it as a run of uvec4s; padded explicitly so std430 and that path agree.
-//
-// The clock rides with the system's local-to-world transform: both are per-system
-// state that every pass needs, and this buffer is already bound to the update and
-// render passes, so the transform costs no extra binding or upload.
+// What the GPU receives per system. A whole number of vec4s wide so the GLES
+// path can carry it as uvec4s; padded explicitly so std430 agrees. The transform
+// rides along since this buffer is already bound to every pass.
 typedef struct {
 	float elapsed;
 	float dt;           // elapsed advanced since the last update pass
@@ -51,9 +46,8 @@ typedef struct {
 	float burst_count;  // burst particles this pass: window is [base, base + count)
 	float pad0;
 
-	// The first three rows of the system's local-to-world matrix, row-major, i.e.
-	// row r is (m[r][0], m[r][1], m[r][2], m[r][3]). The fourth row of an affine
-	// transform is always (0, 0, 0, 1), so it is not stored; the shader rebuilds it.
+	// First three rows of the local-to-world matrix, row-major; the shader
+	// rebuilds the affine (0, 0, 0, 1) row
 	float transform[12];
 } grain_clock_entry_t;
 
@@ -99,9 +93,8 @@ grain_set_clock_rate(grain_particle_clock_t* c, double rate) {
 	c->rate = rate;
 }
 
-// Queue a burst: emitted all at one instant at the next snapshot, in counter
-// positions appended after the steady window. Accumulates across calls until the
-// snapshot collects it; the accumulated total saturates at `max_pending`.
+// Queue a burst, emitted at one instant at the next snapshot after the steady
+// window. Accumulates across calls, saturating at `max_pending`.
 static inline void
 grain_queue_burst(grain_particle_clock_t* c, double count, double max_pending) {
 	c->pending_burst += count;
@@ -114,10 +107,9 @@ static inline grain_clock_entry_t
 grain_snapshot_clock(grain_particle_clock_t* c, int pool_size) {
 	double count_s = c->emitted - c->emitted_synced;
 	double count_b = c->pending_burst;
-	// More emissions than slots in one pass would need a slot to be born twice; the
-	// ring can only express one. Drop the excess rather than corrupt the ring.
-	// The burst keeps its particles first: a thinned stream for one pathological
-	// frame is invisible, a shrunken explosion is not.
+	// More emissions than slots would need a slot born twice: drop the excess,
+	// steady stream first, since a thinned stream is invisible but a shrunken
+	// explosion is not
 	if (count_b > (double)pool_size)           { count_b = (double)pool_size; }
 	if (count_s > (double)pool_size - count_b) { count_s = (double)pool_size - count_b; }
 

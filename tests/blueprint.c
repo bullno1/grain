@@ -7,9 +7,8 @@ static btest_suite_t blueprint = {
 	.cleanup_per_test = test_grain_cleanup,
 };
 
-// The record layer (JSON <-> grain_blueprint_t) is pure and GPU-free.
-// Materialization (grain_load_blueprint, grain_blueprint_apply) needs
-// archetypes and pools which are out of scope here.
+// The record layer (JSON <-> grain_blueprint_t) is GPU-free; materialization
+// needs pools and is out of scope
 
 static char*
 test_strdup(const char* str) {
@@ -393,11 +392,8 @@ BTEST(blueprint, emit_parse_round_trip) {
 	cf_destroy_json(out_doc);
 }
 
-// The saved document borrows only from the blueprint: as long as the caller
-// keeps the blueprint alive, the document survives unrelated grain activity
-// (a module definition resets the transient arena) up until serialization.
-// The document stores string pointers without copying, so serializing garbage
-// here means emit leaked a reference into memory it does not own.
+// The saved document borrows only from the blueprint, so it must survive
+// unrelated grain activity (a module definition resets the transient arena)
 BTEST(blueprint, bounds_round_trip) {
 	grain_blueprint_t bp = {
 		.name = sintern("Bounded"),

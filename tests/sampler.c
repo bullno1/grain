@@ -7,8 +7,7 @@ static btest_suite_t sampler = {
 };
 
 // Definition-time handling of the Samplers block: scanning, decorators, the
-// inspect compile against the generated declarations, and the error paths.
-// Archetype codegen and actual GPU binding need a GPU and are out of scope.
+// inspect compile and the error paths. GPU binding is out of scope.
 
 BTEST(sampler, samplers_block_scanned) {
 	grain_affector_t* affector = grain_define_affector(

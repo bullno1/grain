@@ -16,11 +16,9 @@
 
 #endif
 
-// GLSL ES 3.00 has only the 2x16 pack/unpack family, the 4x8 variants are ES
-// 3.10, so the GLES backend needs them spelled out. They are defined under
-// cf_ names and the real names redirected onto them: redefining a name the
-// driver may itself expose as a builtin is an overload conflict on some ES
-// drivers, while a cf_ name can never collide.
+// GLSL ES 3.00 lacks the 4x8 pack/unpack family. Defined under cf_ names and
+// redirected, since redefining a possible builtin is an overload conflict on
+// some ES drivers
 #ifdef CF_GLES
 
 uint cf_packUnorm4x8(vec4 v) {
@@ -92,8 +90,7 @@ vec2 unit_vec(float angle) {
 	return vec2(cos(angle), sin(angle));
 }
 
-// 3D overload extending the 2D form: azimuth turns in the XY plane exactly
-// like unit_vec(angle), elevation lifts out of it toward +z, so
+// Azimuth in the XY plane, elevation toward +z:
 // unit_vec(a, 0.0) == vec3(unit_vec(a), 0.0)
 vec3 unit_vec(float azimuth, float elevation) {
 	return vec3(unit_vec(azimuth) * cos(elevation), sin(elevation));
@@ -148,9 +145,8 @@ float rand_range(float lo, float hi) {
 
 #if GRAIN_SHADER_STAGE == GRAIN_SHADER_STAGE_VERTEX
 
-// Which corner of the particle's quad this invocation computes. A render pass
-// draws a 4-vertex strip per particle so it is the vertex index; the probe
-// pass (probe.vert.glsl) visits one corner per instance and sets it explicitly.
+// Which quad corner this invocation computes: the vertex index in a render
+// pass, set explicitly per instance by the probe pass
 #ifdef GRAIN_PROBE
 int grain_corner_index;
 #define GRAIN_CORNER_INDEX grain_corner_index
@@ -177,11 +173,9 @@ void cull() {
 
 vec4 grain_Color;
 
-// Pixel-art sampling under a linear filter, same as Cute Framework's smooth_uv:
-// snaps uv to texel centers and lets the filter blend only within the one
-// screen-pixel band around each texel seam, so scaled and rotated sprites keep
-// crisp texels with antialiased edges. Once texels shrink below a screen pixel
-// it degrades to plain linear sampling.
+// Pixel-art sampling under a linear filter, same as CF's smooth_uv: crisp
+// texels with antialiased seams, degrading to plain linear once texels shrink
+// below a screen pixel
 vec2 smooth_uv(vec2 uv, vec2 texture_size) {
 	vec2 pixel = uv * texture_size;
 	vec2 seam = floor(pixel + 0.5);

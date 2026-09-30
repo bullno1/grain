@@ -71,14 +71,8 @@ grain_blueprint_type_base(CF_ShaderInfoDataType type) {
 	}
 }
 
-/**
- * The double whose shortest decimal form is also the shortest decimal that
- * round-trips the float.
- *
- * yyjson prints the shortest representation of a double; the double closest to
- * a float prints with a noisy tail (0.1f -> "0.10000000149011612").
- * Casting the result back to float always recovers `value` exactly.
- */
+// The double whose shortest decimal form round-trips the float: the closest
+// double prints with a noisy tail (0.1f -> "0.10000000149011612")
 static double
 grain_blueprint_json_double(float value) {
 	char buf[32];

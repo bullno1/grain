@@ -69,10 +69,8 @@ grain_load_blueprint_baked(grain_t* grain, const grain_baked_effect_t* baked) {
 	archetype->shaders.render_vert_bytecode = baked->render_vert_bytecode;
 	archetype->shaders.render_frag_bytecode = baked->render_frag_bytecode;
 
-	// Same ownership conventions as grain_define_archetype so
-	// grain_cleanup_archetype and pool reconciliation work unchanged: dynamic
-	// arrays and exact-size decorator storage, every name interned (all
-	// lookups are pointer comparisons on interned strings)
+	// Same ownership conventions as grain_define_archetype so cleanup and pool
+	// reconciliation work unchanged; every name interned
 	archetype->param_decorator_args = baked->num_decorator_args > 0
 		? cf_alloc(sizeof(grain_decorator_arg_t) * baked->num_decorator_args)
 		: NULL;
@@ -240,9 +238,8 @@ grain_baked_pool_matches(grain_pool_t* pool, const grain_baked_effect_t* baked) 
 // Exporter
 // ---------------------------------------------------------------------------
 
-// Appends one owner's decorators (and their args) to the scratch flat tables.
-// The rebuilt order is this visit order, not the archetype's storage order;
-// only the (first, num) ranges matter.
+// Appends one owner's decorators to the scratch flat tables. Order is visit
+// order; only the (first, num) ranges matter.
 static void
 grain_bake_decorators(
 	grain_bake_scratch_t* scratch,

@@ -13,9 +13,8 @@ void main() {
 	SystemParams params = grain_load_SystemParams(region);
 	grain_SystemClock clock = grain_load_SystemClock(region);
 
-	// The CPU folded `elapsed` down to keep it precise; bring this particle's birth
-	// into the same epoch. Only the update pass does this, and it stores the result,
-	// so the shift is applied exactly once.
+	// Bring the birth into the epoch the CPU folded `elapsed` into. Stored, so
+	// the shift is applied exactly once.
 	if (particle.grain_birth >= 0.0) { particle.grain_birth -= clock.wrap_shift; }
 
 	grain_Schedule sch = grain_schedule(lid, uint(grain_pool_size), particle.grain_birth, clock);

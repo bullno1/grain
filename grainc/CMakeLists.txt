@@ -10,11 +10,9 @@ target_include_directories(grainc PRIVATE
 )
 
 if (EMSCRIPTEN)
-	# The web build bakes its own effects: grainc is compiled to wasm like
-	# everything else and run under node, which the emscripten toolchain
-	# registers as CMAKE_CROSSCOMPILING_EMULATOR so custom commands naming the
-	# target pick it up automatically (see cmake/grainc.cmake). It never opens
-	# a window, so CF's canvas-oriented link options are harmless
+	# The web build runs the wasm grainc under node, the toolchain's
+	# CMAKE_CROSSCOMPILING_EMULATOR. It never opens a window, so CF's
+	# canvas-oriented link options are harmless
 	target_link_options(grainc PRIVATE
 		-sNODERAWFS=1     # read the effect and module files from the real disk
 		-sEXIT_RUNTIME=1  # propagate the exit code to the build system

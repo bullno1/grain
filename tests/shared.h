@@ -6,11 +6,8 @@
 #include "internal.h"
 
 /**
- * A grain_t without any GPU resources.
- *
- * Module and archetype definition only need the arena (shader compilation is
- * CPU-side via cute-spirv); headless skips just the GPU shader objects. Pools
- * create GPU resources and are out of reach here.
+ * A grain_t without GPU resources: module and archetype definition work,
+ * pools do not.
  */
 static grain_t test_grain_storage;
 

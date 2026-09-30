@@ -27,9 +27,8 @@ mat4 grain_clock_transform(grain_SystemClock clock) {
 	));
 }
 
-// A particle's birth time is grain-internal state: it lives in a reserved lane of the
-// attribute texture, outside ParticleAttrs, so modules can neither read nor clobber
-// it. Negative means the slot has never been born.
+// Birth time lives in a reserved lane outside ParticleAttrs so modules cannot
+// clobber it. Negative means the slot has never been born.
 struct grain_Schedule {
     bool  started;  // the slot holds a particle
     bool  emit;     // ...and it was born during this frame's window
@@ -39,17 +38,11 @@ struct grain_Schedule {
 
 void grain_srand(uint id, uint gen) { grain_rng_state = grain_pcg(id ^ grain_pcg(gen)); }
 
-// Update-pass scheduling. Emission is counted, not timed: the k-th particle ever
-// emitted by a system lands in slot k mod pool_size, and each frame the CPU hands over
-// the window [emit_base, emit_base + emit_count) of that counter. A slot emits iff some
-// integer k in the window maps to it. Because the mapping never consults the rate, a
-// rate change only alters how fast the window advances -- the birth times of existing
-// particles are untouched, so nothing pops in or out.
-//
-// Round-robin over the whole pool means a slot is revisited every pool_size / rate
-// seconds, and pool_size = ceil(max_rate * lifetime_budget) + max_burst_size makes
-// that at least the budget at every permitted rate plus one max-size burst: a live
-// particle is never recycled.
+// Emission is counted, not timed: the k-th particle ever emitted lands in slot
+// k mod pool_size, and the CPU hands over the window [emit_base, emit_base +
+// emit_count) of that counter each frame. A rate change only alters how fast
+// the window advances, so existing birth times are untouched, and pool sizing
+// guarantees a live particle is never recycled.
 grain_Schedule grain_schedule(uint lid, uint pool_size, float birth, grain_SystemClock clock) {
 	grain_Schedule s;
 	s.birth = birth;
@@ -70,9 +63,8 @@ grain_Schedule grain_schedule(uint lid, uint pool_size, float birth, grain_Syste
 		}
 	}
 
-	// The burst window sits after the steady one in the counter. When the CPU-side
-	// clamp fired, the two can still land on the same slot; the burst wins, matching
-	// the clamp's priority, so no guard on s.emit here.
+	// The burst window follows the steady one; when the CPU clamp fired, both
+	// can hit the same slot and the burst wins, so no guard on s.emit
 	if (clock.burst_count > 0.0) {
 		float base = clock.burst_base;
 		uint k_lo = uint(ceil(base));
@@ -90,9 +82,8 @@ grain_Schedule grain_schedule(uint lid, uint pool_size, float birth, grain_Syste
 	return s;
 }
 
-// Render-pass view of a slot: the update pass already stored the birth, so nothing is
-// decided here, only read back. `emit` recovers "born during the last update" so the
-// render stages can hand modules the same Ctx the update stage did.
+// Render-pass view of a slot, read back from what the update pass stored.
+// `emit` recovers "born during the last update" for the module Ctx.
 grain_Schedule grain_observe(float birth, grain_SystemClock clock) {
 	grain_Schedule s;
 	s.birth   = birth;

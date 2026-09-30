@@ -214,9 +214,8 @@ grain_scan_params_block(
 	CK_DYNA grain_decorator_t** decorators,
 	CK_DYNA grain_decorator_arg_t** args
 ) {
-	// A declarator is the last identifier of each comma-separated segment:
-	// qualifiers and types are skipped naturally, and the compiler validates
-	// the actual declaration right after.
+	// A declarator is the last identifier of each comma-separated segment;
+	// the compiler validates the actual declaration afterwards
 	CK_DYNA const char** declarators = NULL;
 	const char* last_ident = NULL;
 	int pending_start = asize(*decorators);
@@ -289,10 +288,8 @@ end:
 	return ok;
 }
 
-// The Samplers grammar is strict: `sampler2D <name>;` only  because unlike
-// Params the declarations never reach the GLSL compiler for validation: the
-// block is discarded by `#define Samplers(X)` and grain re-emits managed
-// declarations from the scanned names.
+// Strict `sampler2D <name>;` grammar: unlike Params, these declarations never
+// reach the GLSL compiler, grain re-emits them from the scanned names
 static bool
 grain_scan_samplers_block(
 	grain_t* grain,

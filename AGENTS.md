@@ -6,6 +6,16 @@ This file provides guidance to coding agents when working with code in this repo
 
 Grain is a GPU-driven composable particle system with its own DSL, built on [Cute Framework](https://github.com/RandyGaul/cute_framework). Written in C (C23, `CMAKE_C_EXTENSIONS OFF`).
 
+## General coding convention
+
+Keep comments short, do not over explain.
+
+Only explain what is not obvious, not re-explain what the code does.
+
+In a .h file, comments must not mention internal implementation details.
+
+Never comment what is defined where, clangd is perfectly capable of locating that.
+
 ## Commands
 
 First-time setup: `./bootstrap` (git-lfs pull + submodule init; all deps are submodules in `deps/`).

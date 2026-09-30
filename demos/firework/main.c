@@ -1,21 +1,7 @@
-// Firework demo: many shots in flight at once, each made of two particle
-// systems from two pools.
-//
-// * Rising: a steady Trail system follows the rocket, which the CPU
-//   integrates and steers toward a random apex. The rocket's pose is the
-//   trail system's transform: the emitter works in the rocket's local frame
-//   and the CPU never touches its position params.
-// * Exploding: at the apex the trail stops emitting and a Burst system in
-//   the other pool, placed by its own transform, fires one burst of sparks.
-//
-// The phase switch is CPU-side; the particles themselves only ever live on
-// the GPU. Every live system is a separate grain_system_t, so with several
-// shots in the air the demo also exercises many systems per pool, each with
-// its own parameters and transform, in one batched draw.
-//
-// Both effects are baked by grainc from firework_trail.json and
-// firework_burst.json: tuned values come from the files, and the per-shot
-// values are set through the generated typed handles.
+// Firework demo: each shot is two systems from two pools. While rising, a
+// Trail system follows the CPU-integrated rocket through its transform; at
+// the apex a Burst system in the other pool fires once. Several shots in
+// flight exercise many systems per pool in one batched draw.
 #include <cute.h>
 #include <grain_firework_trail.h>
 #include <grain_firework_burst.h>

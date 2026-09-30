@@ -2,10 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Every shipped sample loads headlessly: the embedded module sources parse,
-// their decorators scan, and the composed archetype compiles for both the
-// desktop and the GLES shader variants. Loading never touches the module
-// paths a sample records, so the samples are self-contained here.
+// Every shipped sample loads headlessly: embedded sources parse and the
+// composed archetype compiles for both shader variants
 
 static btest_suite_t samples = {
 	.name = "samples",

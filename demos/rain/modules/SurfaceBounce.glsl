@@ -33,15 +33,13 @@ Samplers(
 	sampler2D surface;
 )
 
-// The drop may cross several texels in one frame: how finely to retrace its
-// path back to the point of entry, and how many texels to push it out by
-// when it is still embedded afterwards
+// Retrace resolution back to the entry point, and how far to push out a drop
+// still embedded afterwards
 const int BACKTRACK_STEPS = 8;
 const int PUSH_OUT_STEPS = 4;
 
-// The surface is a canvas covering world_min..world_max: alpha is coverage,
-// RG its velocity with (0.5, 0.5) at rest. Texture row 0 is the top of the
-// world, as with every CF canvas
+// Canvas covering world_min..world_max: alpha is coverage, RG velocity with
+// (0.5, 0.5) at rest. Row 0 is the top of the world, as with every CF canvas
 vec4 sample_surface(vec2 p, ModuleParams params) {
 	vec2 t = (p - params.world_min) / (params.world_max - params.world_min);
 	vec2 uv = vec2(t.x, 1.0 - t.y);
@@ -70,9 +68,8 @@ void process(inout ParticleAttrs particle, ModuleParams params, Ctx ctx) {
 		p += back;
 	}
 
-	// Surface normal from the coverage gradient at the entry point. The
-	// stencil is two texels wide so it still straddles the edge when the
-	// retrace overshoots by a step
+	// Normal from the coverage gradient; a two-texel stencil still straddles
+	// the edge when the retrace overshoots by a step
 	vec2 texel = (params.world_max - params.world_min) / vec2(textureSize(surface, 0));
 	vec2 dx = vec2(texel.x * 2.0, 0.0);
 	vec2 dy = vec2(0.0, texel.y * 2.0);

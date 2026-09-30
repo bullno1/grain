@@ -2,9 +2,8 @@ if (EMSCRIPTEN)
 	return()
 endif ()
 
-# Bake the sample effects at build time; the generated headers are consumed
-# by baked_codegen.c / baked_codegen_impl.c to prove the emitted C compiles,
-# links (two TUs, one implementation) and loads
+# Bake the sample effects at build time to prove the emitted C compiles, links
+# (two TUs, one implementation) and loads
 grain_compile_effect(
 	"${CMAKE_CURRENT_SOURCE_DIR}/../samples/fire.json"
 	fire

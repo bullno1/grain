@@ -153,9 +153,8 @@ SCENE_VAR(CK_MAP(module_meta_t*), emitters)
 SCENE_VAR(CK_MAP(module_meta_t*), affectors)
 SCENE_VAR(CK_MAP(module_meta_t*), renderers)
 
-// A sampler slot's binding as the editor tracks it: the archetype only holds
-// GPU handles, the path is editor state. The binding owns its decoded pixels
-// and derives its texture from them on demand.
+// A sampler slot's binding as the editor tracks it. Owns its decoded pixels
+// and derives the texture from them on demand.
 typedef struct {
 	char* path;  // sstring; NULL when the slot is unbound
 	CF_Image image;  // pix == NULL when the file could not be resolved
@@ -501,9 +500,8 @@ remember_directory(char** dir_var, const char* file_path) {
 	}
 }
 
-// SDL reads the filter list when the dialog's callback fires, long after the
-// begin call has yielded out of the coroutine, so the filters cannot be
-// compound literals in the coroutine's (transient) stack frame
+// SDL reads the filter list when the dialog callback fires, after the
+// coroutine has yielded, so it cannot live on the coroutine's stack
 static const ufa_filter_t module_file_filters[] = {
 	{ .name = "grain module", .pattern = "shd;glsl" },
 	{ .name = "All files", .pattern = "*" },
@@ -944,9 +942,8 @@ show_ratio_bar(const char* label, float ratio, const char* overlay, const char* 
 	ImGui_TextUnformatted(label);
 }
 
-//! The slot ring: one column per bin, lit by the fraction of live slots, with
-//! the emission cursor marked. Waste is the dark part; a cursor sweeping into
-//! lit slots means live particles are being recycled.
+//! The slot ring: one column per bin, lit by the fraction of live slots. A
+//! cursor sweeping into lit slots means live particles are being recycled.
 static void
 show_slot_strip(void) {
 	ImDrawList* draw_list = ImGui_GetWindowDrawList();
@@ -1187,15 +1184,8 @@ show_module_list(CK_MAP(module_meta_t*) module_map, const char* label, int* curr
 	return ImGui_ComboCallback(label, current_item, module_list_name_getter, module_map, map_size(module_map));
 }
 
-/**
- * Resolve a `@range` bound that is either a number literal or a bare
- * identifier naming a sibling scalar param of the same type, whose current
- * value becomes the bound (e.g. `min_angle` clamped by `max_angle`).
- *
- * Returns false when the bound is absent or the reference does not resolve,
- * in which case the field is simply unclamped on that side. *is_ref reports
- * whether the bound came from a sibling.
- */
+// Resolve a `@range` bound: a number literal or a sibling scalar param whose
+// current value becomes the bound. False leaves that side unclamped.
 static bool
 resolve_range_bound(
 	const grain_param_decorator_t* range_decorator,
@@ -1490,9 +1480,8 @@ save_texture_path(
 	return meta != NULL ? meta->path : NULL;
 }
 
-// Save to current_file_ref without a dialog when one is held ("Save"), or
-// always through a dialog when force_dialog is set ("Save as").
-// Return whether saving was successful.
+// "Save" reuses current_file_ref when held; force_dialog is "Save as".
+// Returns whether saving succeeded.
 bco_static(bool, do_save_system, bool force_dialog) {
 	bco_vars(
 		ufa_save_file_t* save_file;
@@ -1737,9 +1726,8 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 		if (bp_module.path != NULL) {
 			sset(module_meta->path, bp_module.path);
 #ifndef __EMSCRIPTEN__
-			// Safe even when the file is missing: bresmon degrades to a NULL
-			// watch on Linux and to a directory-level watch on Windows, which
-			// even picks the file up if it appears later.
+			// Safe when the file is missing: bresmon degrades to a NULL watch
+			// on Linux and a directory-level watch on Windows
 			watch_module(module_meta->path, module_meta);
 
 			FILE* file = fopen(bp_module.path, "rb");
@@ -2192,9 +2180,8 @@ update_camera(void) {
 	}
 }
 
-// Gizmo picking, grain_end_render and gizmo drawing all read the draw3d
-// stacks: pushed before the UI pass, kept until the frame is presented since
-// draw commands are only flushed then
+// The draw3d stacks are pushed before the UI pass and kept until present,
+// since draw commands are only flushed then
 static void
 push_camera(void) {
 	float aspect = (float)cf_app_get_canvas_width() / (float)cf_app_get_canvas_height();
@@ -2276,9 +2263,8 @@ update(void) {
 
 	debug_draw_begin((grain_view_t)view_mode);
 
-	// The camera goes up before the UI pass: gizmo picking unprojects the
-	// mouse through it. Captured once so the pop matches even when the View
-	// combo flips the mode mid-frame.
+	// Pushed before the UI pass for gizmo picking. Captured once so the pop
+	// matches even when the View combo flips the mode mid-frame.
 	bool is_3d = view_mode == GRAIN_VIEW_3D;
 	if (is_3d) {
 		update_camera();

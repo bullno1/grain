@@ -4,18 +4,11 @@
 /**
  * Runtime support for effects baked by `grainc`.
  *
- * A generated `grain_<effect>.h` is an stb-style single-header module: every
- * include sees the declarations, and exactly one translation unit defines the
- * data by defining `GRAIN_<EFFECT>_IMPLEMENTATION` (or the shared
- * `GRAIN_EFFECT_IMPLEMENTATION`) before including it. The header instantiates
- * a `grain_baked_effect_t` and `grain_<effect>_load` hands it to
- * @ref grain_load_blueprint_baked, which defines the archetype from
- * precompiled bytecode.
- * (@ref grain_blueprint_pool_opts, @ref grain_blueprint_apply, ...).
- *
- * Generated headers also expose one typed parameter handle per param and
- * sampler, used through @ref grain_set / @ref grain_get for type-checked,
- * index-free access.
+ * A generated `grain_<effect>.h` is an stb-style single header: define
+ * `GRAIN_<EFFECT>_IMPLEMENTATION` (or `GRAIN_EFFECT_IMPLEMENTATION`) in exactly
+ * one translation unit. `grain_<effect>_load` defines the archetype from
+ * precompiled bytecode and returns a blueprint. Typed handles per param and
+ * sampler go through @ref grain_set / @ref grain_get.
  */
 
 #include <grain.h>
@@ -144,27 +137,16 @@ typedef struct {
 } grain_baked_effect_t;
 
 /**
- * Define the archetype (under `baked->name`) and return a blueprint, exactly
- * like grain_load_blueprint but from baked data: no shader compilation, the
- * bytecode is referenced, never owned or freed.
- *
- * Redefinition under a live name follows the usual reload semantics (cleanup +
- * revision bump). Baked effects register no modules, so they are invisible to
- * grain_snapshot_system / grain_save_blueprint.
- *
- * Destroy the result with grain_destroy_blueprint. NULL on error (see
- * grain_get_last_error).
+ * Like grain_load_blueprint but from baked data: the bytecode is referenced,
+ * never owned. Baked effects register no modules, so they cannot be snapshotted
+ * or saved. Destroy the result with grain_destroy_blueprint. NULL on error.
  */
 grain_blueprint_t*
 grain_load_blueprint_baked(grain_t* grain, const grain_baked_effect_t* baked);
 
 // ---------------------------------------------------------------------------
-// Typed parameter handles
-//
-// Generated headers expose one handle per param/sampler, carrying the flat
-// index that grain_get_parameter / grain_set_texture expect. Distinct handle
-// types make grain_set / grain_get dispatch to a matching accessor, so a
-// wrong value type is a compile error.
+// Typed parameter handles: one per param/sampler, with distinct types so
+// grain_set / grain_get reject a wrong value type at compile time
 // ---------------------------------------------------------------------------
 
 typedef struct { int index; const grain_baked_effect_t* effect; } grain_param_float_t;
@@ -274,9 +256,8 @@ grain_get_param_vec3_cf(grain_system_t* system, grain_param_vec3_t param, CF_V3*
 	out->z = value[2];
 }
 
-// A color can land on either a packed-RGBA8 uint param or a vec4 param; the
-// handle's effect carries the shader type, so these check it and convert
-// through CF's own cf_color_to_pixel / cf_pixel_to_color conventions.
+// A color param may be a packed-RGBA8 uint or a vec4; these check the shader
+// type and convert accordingly
 
 static inline void
 grain_set_param_color_checked(
@@ -399,18 +380,12 @@ grain_bind_sprite(grain_pool_t* pool, grain_sampler_h_t sampler, const CF_Sprite
  * Type-checked parameter/texture write through a generated handle:
  *
  *     grain_set(system, grain_fire.Fan[1].strength, 2.0f);
- *     grain_set(system, grain_fire.Point.position, (grain_vec2_t){ 0.f, 60.f });
  *     grain_set(system, grain_fire.Point.position, cf_v2(0.f, 60.f));
  *     grain_set(system, grain_fire.Circle.start_color, cf_make_pixel_rgb(255, 80, 0));
  *     grain_set(pool, grain_fire.Flame.image, binding);  // samplers bind pools
  *
- * A value of the wrong type is a compile error. The value is variadic so
- * compound literals with commas need no extra parentheses.
- *
- * CF types are accepted alongside the grain array types: CF_V2 / CF_V3 for
- * vec2 / vec3 params, and CF_Color / CF_Pixel for color params of either
- * representation -- the wrapper checks whether the param is a packed uint or
- * a vec4 and converts accordingly.
+ * A value of the wrong type is a compile error. CF_V2 / CF_V3 and
+ * CF_Color / CF_Pixel are accepted alongside the grain array types.
  */
 #define grain_set(target, param, ...) _Generic((param), \
 	grain_param_float_t: grain_set_param_float, \
@@ -440,16 +415,12 @@ grain_bind_sprite(grain_pool_t* pool, grain_sampler_h_t sampler, const CF_Sprite
 )((target), (param), __VA_ARGS__)
 
 /**
- * Typed parameter read through a generated handle, written to `out`:
- * the destination array for vector/matrix params, a pointer for scalars
- * and CF types.
+ * Typed parameter read through a generated handle into `out`: an array for
+ * vector/matrix params, a pointer for scalars and CF types.
  *
- *     grain_vec2_t position;
- *     grain_get(system, grain_fire.Point.position, position);
- *     CF_V2 p;
- *     grain_get(system, grain_fire.Point.position, &p);
- *     float drag;
- *     grain_get(system, grain_fire.Wind.drag, &drag);
+ *     grain_get(system, grain_fire.Point.position, position);  // grain_vec2_t
+ *     grain_get(system, grain_fire.Point.position, &p);        // CF_V2
+ *     grain_get(system, grain_fire.Wind.drag, &drag);          // float
  */
 #define grain_get(system, param, out) _Generic((param), \
 	grain_param_float_t: grain_get_param_float, \

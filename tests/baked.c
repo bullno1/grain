@@ -8,10 +8,8 @@ static btest_suite_t baked = {
 	.cleanup_per_test = test_grain_cleanup,
 };
 
-// Round trip of the baked path, fully headless: modules + archetype compile
-// in one grain (CPU-side codegen), grain_bake flattens them, and
-// grain_load_blueprint_baked reconstructs an equivalent archetype + blueprint
-// in a second grain without touching the compiler.
+// Headless round trip: grain_bake flattens an archetype from one grain, and
+// grain_load_blueprint_baked reconstructs it in a second without the compiler
 
 static const char* emitter_src =
 	"Emitter(Point)\n"

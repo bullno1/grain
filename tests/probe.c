@@ -7,9 +7,8 @@ static btest_suite_t probe = {
 	.cleanup_per_test = test_grain_cleanup,
 };
 
-// The probe pass itself needs a pool and a GPU. What is testable headlessly
-// is the shader it compiles (both the desktop and the web variant, through
-// cute-spirv) and the pure bounds arithmetic.
+// The probe pass needs a GPU; testable headlessly are the shader it compiles
+// and the pure bounds arithmetic
 
 BTEST(probe, bounds_empty_and_union) {
 	grain_bounds_t empty = grain_bounds_empty();
@@ -71,9 +70,8 @@ static const char* affector_src =
 	"	particle.lifetime -= ctx.dt;\n"
 	"}\n";
 
-// Uses quad() and uv_quad(), which the probe pass redirects from the vertex
-// index to its per-instance corner, and a sampler, so the probe's sampler
-// bindings line up with the render stage's
+// Uses quad() and uv_quad(), which the probe pass redirects to its per-instance
+// corner, and a sampler, so the bindings must line up with the render stage's
 static const char* renderer_src =
 	"Renderer(Sprite)\n"
 	"Requires(\n"

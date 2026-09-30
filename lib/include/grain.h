@@ -25,10 +25,8 @@ typedef enum {
 } grain_module_kind_t;
 
 /**
- * A module along with its kind, as declared in its source
- *
- * Only the union member matching `kind` is valid.
- * `kind` is GRAIN_MODULE_INVALID when definition failed.
+ * A module along with its declared kind. Only the union member matching `kind`
+ * is valid; `kind` is GRAIN_MODULE_INVALID when definition failed.
  */
 typedef struct {
 	grain_module_kind_t kind;
@@ -121,11 +119,8 @@ const char*
 grain_get_last_error(grain_t* grain);
 
 /**
- * Define a module of whatever kind its source declares
- *
- * The declared kind is returned so the caller can dispatch on it.
- * Use the typed variants below instead when a specific kind is expected: they
- * reject a module of any other kind.
+ * Define a module of whatever kind its source declares. The typed variants
+ * below reject a module of any other kind.
  */
 grain_module_ref_t
 grain_define_module(grain_t* grain, const char* source);
@@ -163,11 +158,8 @@ const grain_param_decorator_t*
 grain_find_sampler_decorator(const grain_sampler_info_t* sampler, const char* name);
 
 /**
- * Find a decorator argument
- *
- * Python-style resolution: matches the positional argument with this index or
- * the named argument with this name. Returns false if neither exists so the
- * caller can fall back to a default
+ * Find a decorator argument by position or by name, Python-style.
+ * Returns false if neither exists.
  */
 bool
 grain_find_decorator_arg(
@@ -192,30 +184,20 @@ typedef struct {
 } grain_texture_binding_t;
 
 /**
- * Bind a texture to one of this pool's sampler slots.
- *
- * Bindings are per-pool: every system in the pool samples the same texture.
- * Module code reads the slot's `<name>_uvrect` as (uv_min, uv_max)
- * and can remap unit UVs with `atlas_uv`.
- *
- * The binding survives live reload as long as the module keeps a sampler of
- * the same name; a slot whose sampler disappears is unbound.
+ * Bind a texture to one of this pool's sampler slots; every system in the pool
+ * samples it. Module code reads the slot's `<name>_uvrect` as (uv_min, uv_max).
+ * The binding survives live reload while the module keeps a sampler of the
+ * same name.
  *
  * @param sampler_index Index into grain_archetype_info_t::samplers
- *        (grain_module_info_t::first_sampler + i).
  */
 void
 grain_set_texture(grain_pool_t* pool, int sampler_index, grain_texture_binding_t binding);
 
 /**
  * Bind an atlased sprite's current image to one of this pool's sampler slots.
- *
- * Include cute_draw.h before grain.h to enable this helper; the library
- * itself only depends on cute_graphics.h.
- *
- * Call it every frame while the binding is live: the sprite can animate and
- * CF's dynamic atlas can reshuffle, so the CF_TemporaryImage this reads is
- * only valid until the next cf_render_to / cf_app_draw_onto_screen.
+ * Available when cute_draw.h is included before grain.h. Call every frame
+ * while the binding is live: the sprite can animate and the atlas reshuffle.
  */
 static inline void
 grain_set_sprite(grain_pool_t* pool, int sampler_index, const CF_Sprite* sprite) {
@@ -235,29 +217,16 @@ grain_pool_opts_t
 grain_get_pool_opts(grain_pool_t* pool);
 
 /**
- * Grain's default render state for pools.
- *
- * * Premultiplied-alpha "over" blending, matching both CF's own draw pipeline
- *   and the premultiplied pixels of its sprite atlas
- * * Depth test is LESS_EQUAL
- * * Depth write is off
- * * No culling
- *
- * When the target has a depth buffer, opaque geometry occludes particles
- * while particles never occlude anything.
- *
- * Under the premultiplied convention additive blending is a shader decision,
- * not a state change: a renderer module that pushes alpha toward zero while
- * keeping color emits additively, and can vary this per particle.
+ * Grain's default render state for pools: premultiplied-alpha "over" blending,
+ * LESS_EQUAL depth test without depth write, no culling. Additive blending is
+ * a shader decision under this convention: emit color with alpha near zero.
  */
 CF_RenderState
 grain_render_state_defaults(void);
 
 /**
- * Override the render state of a pool.
- *
- * Start from @ref grain_render_state_defaults and tweak.
- * primitive_type is owned by grain and is overwritten.
+ * Override the render state of a pool. Start from
+ * @ref grain_render_state_defaults; primitive_type is overwritten by grain.
  */
 void
 grain_set_render_state(grain_pool_t* pool, CF_RenderState render_state);
@@ -288,36 +257,22 @@ void
 grain_set_emission_rate(grain_system_t* system, float particles_per_second);
 
 /**
- * Queue `count` particles to be emitted in one instant at the next update pass,
- * alongside steady emission.
- *
- * Calls within a frame accumulate; the accumulated total is clamped to the
- * pool's max_burst_size. Burst particles draw from the same slot ring as steady
- * emission: keep the total burst count within any lifetime_budget window under
- * max_burst_size, or the oldest particles may be recycled early.
+ * Queue `count` particles to be emitted at once in the next update pass.
+ * Calls within a frame accumulate, clamped to the pool's max_burst_size.
+ * Bursting more than that within a lifetime_budget window recycles live particles.
  */
 void
 grain_burst(grain_system_t* system, int count);
 
 /**
- * Set a system's local-to-world transform; identity by default.
+ * Set a system's local-to-world transform; identity by default. Instance
+ * state: not a module param and not saved by blueprints. Modules read it as
+ * `ctx.transform` and through `to_world` / `to_world_dir`.
  *
- * The transform is instance state, not authoring state: it is not a module
- * parameter and blueprints do not save it. Modules read it as `ctx.transform`
- * in every stage and through the `to_world` / `to_world_dir` builtins, which
- * is where its meaning is decided:
- *
- * * World-space effects apply it at emission: emitters place particles with
- *   `to_world(params.position)` and orient them with `to_world_dir(...)`,
- *   positional affectors anchor with `to_world(params.position)`. Moving the
- *   system leaves particles already emitted where they are. The bundled
- *   modules follow this convention.
- * * Local-space effects apply it in the renderer instead, e.g.
- *   `grain_transform * vec4(to_world(particle.position), 1.0)`, so every
- *   particle moves rigidly with the system. Emitters and affectors then work
- *   in local coordinates and must not apply it.
- *
- * The value reaches the GPU with the next update pass, like emission.
+ * The bundled modules apply it at emission, so moving the system leaves
+ * emitted particles where they are. A renderer may apply it instead so every
+ * particle moves rigidly with the system; emitters and affectors then work in
+ * local coordinates and must not apply it.
  */
 void
 grain_set_transform(grain_system_t* system, CF_M4x4 transform);
@@ -365,27 +320,17 @@ grain_set_renderer_parameter(
 );
 
 /**
- * Get a raw pointer to a parameter inside the CPU-side buffer of this system.
+ * Get a raw pointer to a parameter, valid until the next call into the library
+ * that touches this system's pool. Writes must be followed by
+ * @ref grain_parameter_modified.
  *
- * The pointer is transient: valid only until the next call into the library
- * that touches this system's pool.
- *
- * Writes through the pointer must be followed by @ref grain_parameter_modified
- * or they may never reach the GPU.
- *
- * @param system The particle system.
- * @param param_index Index into grain_archetype_info_t::params (grain_module_info_t::first_param + i).
- * @return Pointer to the parameter, or NULL if param_index is out of range.
+ * @param param_index Index into grain_archetype_info_t::params
+ * @return NULL if param_index is out of range.
  */
 void*
 grain_get_parameter(grain_system_t* system, int param_index);
 
-/**
- * Flag the buffer that owns this parameter for re-upload.
- *
- * @param system The particle system.
- * @param param_index Index into grain_archetype_info_t::params.
- */
+/** Flag a parameter for re-upload after a write through @ref grain_get_parameter */
 void
 grain_parameter_modified(grain_system_t* system, int param_index);
 
@@ -402,11 +347,8 @@ void
 grain_end_render(grain_t* grain);
 
 /**
- * The camera an effect is authored for.
- *
- * A hint carried by blueprints so an editor knows whether the renderer works
- * in `grain_transform` (2D) or `grain_transform3d`/`grain_projection` (3D)
- * terms. The library itself always uploads both families.
+ * The camera an effect is authored for: a blueprint hint for editors. The
+ * library always uploads both the 2D and 3D transform families.
  */
 typedef enum {
 	GRAIN_VIEW_2D = 0,
@@ -444,24 +386,12 @@ typedef struct {
 } grain_probe_result_t;
 
 /**
- * Capture a system's particles as the renderer sees them.
- *
- * Runs the archetype's render stage in probe mode: the same modules decide
- * liveness and geometry, but the view transforms (`grain_transform`,
- * `grain_transform3d`, `grain_projection`) are identity, so positions come
- * out in world space, and each slot lands in a readback canvas instead of
- * the screen. The system's own transform (@ref grain_set_transform) applies
- * as usual, so probing a system at the identity transform measures the
- * effect in system-local space, which is what blueprint bounds store. Call
- * between grain_end_update and the next grain_begin_update.
- *
- * The first probe of an archetype compiles its probe shader; later ones
- * reuse it. Costs one small draw and a readback of four pool_size rows of
- * float texels, intended for editors and offline tools, not per-frame game
- * use.
- *
- * Baked archetypes (grain_baked.h) carry no shader source and cannot be
- * probed.
+ * Capture a system's particles as the renderer sees them, with the view
+ * transforms at identity so positions come out in world space. The system's
+ * own transform applies, so probing at identity measures system-local space,
+ * which is what blueprint bounds store. Call between grain_end_update and the
+ * next grain_begin_update. Intended for editors and offline tools, not
+ * per-frame use. Baked archetypes cannot be probed.
  *
  * @return NULL on failure (see @ref grain_get_last_error).
  */
@@ -475,11 +405,9 @@ typedef enum {
 } grain_probe_status_t;
 
 /**
- * Poll a probe; the first call after presenting issues the copy out.
- *
- * On GRAIN_PROBE_READY `*out` is the result, owned by the probe and valid
- * until grain_destroy_probe; it stays the same on every later call. `out`
- * may be NULL when only the status matters.
+ * Poll a probe after presenting the frame that captured it. On
+ * GRAIN_PROBE_READY `*out` is the result, valid until grain_destroy_probe.
+ * `out` may be NULL.
  */
 grain_probe_status_t
 grain_probe_poll(grain_probe_t* probe, const grain_probe_result_t** out);
@@ -507,21 +435,15 @@ typedef struct {
 	grain_view_t view;
 
 	/**
-	 * Optional source path lookup, for reopening in an editor.
-	 *
-	 * Called once per distinct module; return NULL to omit the path.
-	 * The library stores the path verbatim and never resolves it.
+	 * Optional source path lookup, called once per distinct module; return NULL
+	 * to omit. Stored verbatim, never resolved.
 	 */
 	const char* (*module_path)(void* userdata, grain_module_kind_t kind, const char* module_name);
 
 	/**
 	 * Optional texture path lookup, one call per sampler slot; return NULL to
-	 * omit the binding.
-	 *
-	 * The library stores the path verbatim and never resolves it: on load the
-	 * caller reads the records back (@ref grain_blueprint_get_texture) and
-	 * binds with @ref grain_set_texture. `module_index` disambiguates the same
-	 * module occupying several slots; the renderer always passes 0.
+	 * omit. Stored verbatim, never resolved. `module_index` disambiguates the
+	 * same module occupying several slots.
 	 */
 	const char* (*texture_path)(
 		void* userdata,
@@ -546,11 +468,8 @@ typedef struct {
 } grain_blueprint_module_t;
 
 /**
- * Snapshot a particle system into a blueprint: module sources, archetype
- * composition, pool config and current param values.
- *
- * The inverse of @ref grain_blueprint_apply. The blueprint owns copies of
- * everything it holds; destroy it with @ref grain_destroy_blueprint.
+ * Snapshot a system into a blueprint: module sources, archetype composition,
+ * pool config and current param values. Destroy with @ref grain_destroy_blueprint.
  *
  * @return NULL on failure (see @ref grain_get_last_error).
  */
@@ -558,25 +477,16 @@ grain_blueprint_t*
 grain_snapshot_system(grain_t* grain, grain_system_t* system, grain_save_opts_t opts);
 
 /**
- * Serialize a blueprint into a JSON value inside the caller's document.
- *
- * The inverse of @ref grain_load_blueprint. The value is not attached to the
- * document; use cf_json_set_root for a standalone file or nest it inside a
- * bigger object.
- *
- * The document borrows the blueprint's strings without copying.
- * Keep the blueprint alive until the document has been serialized or destroyed.
+ * Serialize a blueprint into an unattached JSON value inside the caller's
+ * document. The document borrows the blueprint's strings: keep the blueprint
+ * alive until the document has been serialized or destroyed.
  */
 CF_JVal
 grain_save_blueprint(grain_blueprint_t* blueprint, CF_JDoc doc);
 
 /**
- * Load a blueprint from a JSON value.
- *
- * All embedded modules are defined (redefinition follows the usual live-reload
- * rules) along with the archetype, under its saved name.
- * Everything the blueprint keeps is copied: the document can be destroyed as
- * soon as this returns.
+ * Load a blueprint from a JSON value, defining its modules and archetype under
+ * their saved names. The document may be destroyed as soon as this returns.
  *
  * @return NULL on failure (see @ref grain_get_last_error).
  */
@@ -605,13 +515,8 @@ grain_pool_opts_t
 grain_blueprint_pool_opts(grain_blueprint_t* blueprint);
 
 /**
- * Baked bounds in system-local space (measured with the identity system
- * transform); false when the blueprint has none.
- *
- * Typically measured by probing the effect (@ref grain_probe_system) over a
- * run and set with @ref grain_blueprint_set_bounds. The library stores and
- * saves them verbatim and never culls: the caller tests them against its own
- * view.
+ * Saved bounds in system-local space; false when the blueprint has none.
+ * The library never culls with them: the caller tests them against its view.
  */
 bool
 grain_blueprint_bounds(grain_blueprint_t* blueprint, grain_bounds_t* out);
@@ -621,11 +526,8 @@ void
 grain_blueprint_set_bounds(grain_blueprint_t* blueprint, grain_bounds_t bounds);
 
 /**
- * Overwrite the saved pool config (sizing tools write measured values back).
- *
- * `archetype` is ignored: a blueprint's archetype is whatever it defined.
- * Only affects what grain_save_blueprint writes and what
- * grain_blueprint_pool_opts returns; pools already created are untouched.
+ * Overwrite the saved pool config. `archetype` is ignored; pools already
+ * created are untouched.
  */
 void
 grain_blueprint_set_pool_opts(grain_blueprint_t* blueprint, grain_pool_opts_t opts);
@@ -634,12 +536,9 @@ void
 grain_blueprint_set_emission_rate(grain_blueprint_t* blueprint, float emission_rate);
 
 /**
- * Write the saved param values and emission rate into a system.
- *
- * The system does not have to use the blueprint's archetype: modules are
- * matched by name and params by name and component count, with values
- * converted to the parameter's current type.
- * Unmatched params keep whatever value the system already has.
+ * Write the saved param values and emission rate into a system. Modules are
+ * matched by name and params by name and component count; unmatched params
+ * keep their value.
  */
 void
 grain_blueprint_apply(grain_blueprint_t* blueprint, grain_system_t* system);
@@ -661,12 +560,8 @@ typedef struct {
 } grain_blueprint_texture_info_t;
 
 /**
- * Saved texture bindings, flattened over all slots.
- *
- * grain_blueprint_apply never touches textures -- the library has no pixels
- * and never reads files. Resolve each record's path yourself and bind through
- * @ref grain_set_texture (the slot index is
- * grain_module_info_t::first_sampler + the sampler's position in its module).
+ * Saved texture bindings, flattened over all slots. The library never reads
+ * files: resolve each path yourself and bind through @ref grain_set_texture.
  */
 int
 grain_blueprint_num_textures(grain_blueprint_t* blueprint);

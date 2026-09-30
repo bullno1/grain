@@ -188,9 +188,7 @@ BTEST(module, internal_builtins_are_not_visible_to_modules) {
 }
 
 BTEST(module, modules_cannot_include_internal_paths) {
-	// The inspect VFS only resolves grain/api.glsl, grain/internal.glsl (already
-	// included by the stub), and the module itself; archetype and other-module
-	// paths fail at definition time.
+	// The inspect VFS resolves only the grain/ headers and the module itself
 	grain_emitter_t* emitter = grain_define_emitter(
 		test_grain(),
 		"#include \"archetype/attrs.glsl\"\n"

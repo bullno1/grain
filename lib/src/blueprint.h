@@ -61,11 +61,8 @@ struct grain_blueprint_s {
 };
 
 /**
- * Fill `blueprint` from a JSON value: pure record parsing, no GPU and no
- * module definition, so it works headlessly.
- *
- * On failure the error is reported through grain's last error; `blueprint` may
- * hold partial state and must still be cleaned up.
+ * Fill `blueprint` from a JSON value; pure record parsing, works headlessly.
+ * On failure `blueprint` may hold partial state and must still be cleaned up.
  */
 bool
 grain_blueprint_parse(grain_t* grain, CF_JVal val, grain_blueprint_t* blueprint);

@@ -20,12 +20,8 @@ typedef struct {
 } grain_bake_scratch_t;
 
 /**
- * Flatten a materialized blueprint (one whose archetype exists, i.e. from
- * grain_load_blueprint) into a baked descriptor.
- *
- * `out` points into `scratch` (and into interned strings / the archetype's
- * bytecode), so it is valid until the scratch is freed or the archetype is
- * redefined. The inverse of grain_load_blueprint_baked.
+ * Flatten a materialized blueprint into a baked descriptor. `out` points into
+ * `scratch` and the archetype, so it is valid until either goes away.
  */
 bool
 grain_bake(
