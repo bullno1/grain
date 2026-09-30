@@ -30,7 +30,7 @@ All build scripts accept `BUILD_TYPE` (default `RelWithDebInfo`) and `RELOADABLE
   `bin/linux/RelWithDebInfo-reloadable/grain-tests <suite> [test]`
   (e.g. `grain-tests decorator/scanner`)
 - `cmd` is a symlink to `deps/bgame/cmd`; the scripts are shared across projects and read the executable names from `bgame.env` at the root. Toolchain files live in `deps/bgame/cmake/`, project-specific CMake helpers in `cmake/`.
-- Web: `cmd/web/build` (emscripten; forces `RELOADABLE=OFF`, tests are excluded). Windows: `cmd/win/prepare.bat` then `cmd/win/build.bat`, tests via `cmd/win/test.bat`. Steam Runtime: `cmd/steamrt/*` (`cmd/steamrt/test` runs the tests inside the SDK container).
+- Web: `cmd/web/build` (emscripten; forces `RELOADABLE=OFF`, tests are excluded). Windows: `cmd/win/prepare.bat` then `cmd/win/build.bat`, tests via `cmd/win/test.bat`. MSVC from Linux: `cmd/msvc-wine/build` (cl.exe in the `msvc-wine` podman image, forces `RELOADABLE=OFF`), `cmd/msvc-wine/test` runs the tests in the container, `cmd/msvc-wine/run` uses the host wine. Steam Runtime: `cmd/steamrt/*` (`cmd/steamrt/test` runs the tests inside the SDK container).
 
 CMake exports `compile_commands.json` into `.build/<platform>/<config>/`.
 

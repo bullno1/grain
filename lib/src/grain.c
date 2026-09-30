@@ -1407,7 +1407,7 @@ grain_strcpy(grain_t* grain, const char* str) {
 	if (str == NULL) { return NULL; }
 
 	size_t len = strlen(str);
-	char* copy = cf_arena_alloc(&grain->arena, len + 1);
+	char* copy = cf_arena_alloc(&grain->arena, (int)len + 1);
 	memcpy(copy, str, len + 1);
 	return copy;
 }
@@ -1819,7 +1819,7 @@ grain_begin_update(grain_t* grain) {
 void
 grain_tick(grain_system_t* system, float dt_s) {
 	grain_pool_t* pool = system->pool;
-	int index = system - pool->systems;
+	int index = (int)(system - pool->systems);
 
 	grain_advance_clock(&pool->clocks[index], dt_s);
 	grain_touch(system->pool);
@@ -1828,7 +1828,7 @@ grain_tick(grain_system_t* system, float dt_s) {
 void
 grain_set_emission_rate(grain_system_t* system, float particles_per_second) {
 	grain_pool_t* pool = system->pool;
-	int index = system - pool->systems;
+	int index = (int)(system - pool->systems);
 
 	// The pool was sized for max_emission_rate; exceeding it would recycle live slots.
 	if (particles_per_second > pool->opts.max_emission_rate) {
@@ -1844,7 +1844,7 @@ grain_burst(grain_system_t* system, int count) {
 	if (count <= 0) { return; }
 
 	grain_pool_t* pool = system->pool;
-	int index = system - pool->systems;
+	int index = (int)(system - pool->systems);
 
 	// The pool reserved max_burst_size slots of headroom; a larger accumulated burst
 	// would recycle live slots.
@@ -1968,7 +1968,7 @@ grain_resolve_param(grain_system_t* system, int param_index, void** value) {
 	grain_ssbo_t* ssbo = render ? &pool->render_ssbo : &pool->update_ssbo;
 	if (value != NULL) {
 		int stride = render ? archetype->render_size : archetype->update_size;
-		int index = system - pool->systems;
+		int index = (int)(system - pool->systems);
 		*value = (char*)ssbo->cpu + stride * index + archetype->params_offsets[param_index];
 	}
 	return ssbo;
@@ -1995,7 +1995,7 @@ grain_set_emitter_parameter(
 	const void* value
 ) {
 	grain_pool_t* pool = system->pool;
-	int index = system - pool->systems;
+	int index = (int)(system - pool->systems);
 	grain_archetype_t* archetype = pool->opts.archetype;
 	if (emitter_index >= asize(archetype->emitters)) { return; }
 	grain_reconcile_pool(pool);
@@ -2023,7 +2023,7 @@ grain_set_affector_parameter(
 	const void* value
 ) {
 	grain_pool_t* pool = system->pool;
-	int index = system - pool->systems;
+	int index = (int)(system - pool->systems);
 	grain_archetype_t* archetype = pool->opts.archetype;
 	if (affector_index >= asize(archetype->affectors)) { return; }
 	grain_reconcile_pool(pool);
@@ -2050,7 +2050,7 @@ grain_set_renderer_parameter(
 	const void* value
 ) {
 	grain_pool_t* pool = system->pool;
-	int index = system - pool->systems;
+	int index = (int)(system - pool->systems);
 	grain_archetype_t* archetype = pool->opts.archetype;
 	grain_reconcile_pool(pool);
 
@@ -2143,7 +2143,7 @@ void
 grain_render(grain_system_t* system) {
 	grain_pool_t* pool = system->pool;
 	grain_t* grain = pool->grain;
-	int index = system - pool->systems;
+	int index = (int)(system - pool->systems);
 
 	uint32_t* draw_list_item = grain_index_ssbo(&pool->draw_list, sizeof(uint32_t), pool->num_draws++);
 	*draw_list_item = index;

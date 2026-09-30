@@ -1632,10 +1632,10 @@ reset_editor_system(void) {
 		grain, "Editor",
 		(grain_archetype_spec_t){
 			.emitters = archetype_emitters,
-			.num_emitters = barray_len(archetype_emitters),
+			.num_emitters = (int)barray_len(archetype_emitters),
 
 			.affectors = archetype_affectors,
-			.num_affectors = barray_len(archetype_affectors),
+			.num_affectors = (int)barray_len(archetype_affectors),
 
 			.renderer = archetype_renderer,
 		}
@@ -1771,10 +1771,10 @@ apply_blueprint_to_editor(grain_blueprint_t* blueprint) {
 		grain, "Editor",
 		(grain_archetype_spec_t){
 			.emitters = archetype_emitters,
-			.num_emitters = barray_len(archetype_emitters),
+			.num_emitters = (int)barray_len(archetype_emitters),
 
 			.affectors = archetype_affectors,
-			.num_affectors = barray_len(archetype_affectors),
+			.num_affectors = (int)barray_len(archetype_affectors),
 
 			.renderer = archetype_renderer,
 		}
@@ -2067,10 +2067,10 @@ init(void) {
 
 		archetype = grain_define_archetype(grain, "Editor", (grain_archetype_spec_t){
 			.emitters = archetype_emitters,
-			.num_emitters = barray_len(archetype_emitters),
+			.num_emitters = (int)barray_len(archetype_emitters),
 
 			.affectors = archetype_affectors,
-			.num_affectors = barray_len(archetype_affectors),
+			.num_affectors = (int)barray_len(archetype_affectors),
 
 			.renderer = archetype_renderer,
 		});
@@ -2684,10 +2684,10 @@ update(void) {
 
 		grain_archetype_t* new_archetype = grain_define_archetype(grain, "Editor", (grain_archetype_spec_t){
 			.emitters = archetype_emitters,
-			.num_emitters = barray_len(archetype_emitters),
+			.num_emitters = (int)barray_len(archetype_emitters),
 
 			.affectors = archetype_affectors,
-			.num_affectors = barray_len(archetype_affectors),
+			.num_affectors = (int)barray_len(archetype_affectors),
 
 			.renderer = archetype_renderer,
 		});

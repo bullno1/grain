@@ -332,7 +332,7 @@ grain_dsl_parse_module(
 				NULL, 0, prelude_fmt, 8 + i, samplers[i], samplers[i]
 			);
 		}
-		char* prelude = cf_arena_alloc(&grain->arena, prelude_size);
+		char* prelude = cf_arena_alloc(&grain->arena, (int)prelude_size);
 		size_t offset = 0;
 		for (int i = 0; i < asize(samplers); ++i) {
 			offset += (size_t)snprintf(

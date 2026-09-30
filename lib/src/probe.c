@@ -99,7 +99,7 @@ grain_probe_system(grain_system_t* system) {
 	grain_pool_t* pool = system->pool;
 	grain_t* grain = pool->grain;
 	grain_archetype_t* archetype = pool->opts.archetype;
-	int index = system - pool->systems;
+	int index = (int)(system - pool->systems);
 
 	if (!archetype->has_probe_sources) {
 		grain_set_last_error(grain, "Baked archetypes carry no shader source and cannot be probed");
