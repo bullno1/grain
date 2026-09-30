@@ -43,7 +43,7 @@ jobs:
     name: Web
     runs-on: ubuntu-latest
     env:
-      EM_VERSION: 6.0.0
+      EM_VERSION: 6.0.10
       EM_CACHE_FOLDER: 'emsdk-cache'
     steps:
       - name: Checkout
@@ -91,19 +91,10 @@ jobs:
           submodules: recursive
           lfs: true
 
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ccache-${{ github.job }}
-          max-size: 16GB
-          variant: sccache
-
       - name: Install CMake
         uses: ssrobins/install-cmake@v1
 
       - name: Build
-        env:
-          GENERATOR: "Ninja Multi-Config"
         run: cmd/win/build.bat
 
       - name: Test

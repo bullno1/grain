@@ -9,7 +9,9 @@ set(SOURCES
 )
 
 if (WIN32)
-	set(SOURCES ${SOURCES} "resources.rc")
+	# Not resources.rc: Visual Studio names a .res after its script alone, and
+	# grain brings its own resources.rc
+	set(SOURCES ${SOURCES} "editor_resources.rc")
 endif ()
 
 add_bgame_app(grain-editor "${SOURCES}")

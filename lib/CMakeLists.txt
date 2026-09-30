@@ -33,9 +33,9 @@ if (MSVC)
 	# INTERFACE source compiled into every module that links grain
 	target_sources(grain INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src/resources.rc")
 	# rc resolves the RCDATA paths against its include path, so the prefix is
-	# empty here and the source dir is the include dir instead
+	# empty here (the script defines it for rc itself: Visual Studio generators
+	# ignore per-language definitions) and the source dir is the include dir
 	target_compile_definitions(grain PRIVATE GRAIN_SRC_DIR=)
-	target_compile_definitions(grain INTERFACE "$<$<COMPILE_LANGUAGE:RC>:GRAIN_SRC_DIR=>")
 	target_include_directories(grain INTERFACE
 		"$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}/src>"
 		# The script #includes glsl_stamp.h so the resource compiler's

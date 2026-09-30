@@ -1,9 +1,10 @@
 #include "xincbin.h"
 
 #ifdef RC_INVOKED
-// Changes whenever a glsl file does, so the resource compiler's dependency
-// scan (which only sees #includes, never RCDATA payloads) re-embeds them
 #include "glsl_stamp.h"
+#ifndef GRAIN_SRC_DIR
+#	define GRAIN_SRC_DIR
+#endif
 #endif
 
 XINCBIN(grain_update_fs, GRAIN_SRC_DIR "glsl/update.frag.glsl")

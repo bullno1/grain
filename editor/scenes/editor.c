@@ -19,7 +19,7 @@
 #include <math.h>
 #include <stdio.h>
 #include "../pref.h"
-#include "../resources.rc"
+#include "../editor_resources.rc"
 
 #ifndef __EMSCRIPTEN__
 #	define BRESMON_API static
@@ -2753,4 +2753,4 @@ SCENE {
 #endif
 
 #define XINCBIN_IMPLEMENTATION
-#include "../resources.rc"
+#include "../editor_resources.rc"
