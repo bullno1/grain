@@ -704,7 +704,7 @@ fail:
 }
 
 #define CUTE_SPIRV_IMPLEMENTATION
-#include "cute_spirv.h"
+#include <cute/cute_spirv.h>
 
 #define XINCBIN_IMPLEMENTATION
 #include "resources.rc"

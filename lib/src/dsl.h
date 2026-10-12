@@ -5,7 +5,7 @@
 #include <cute.h>
 #include "decorator.h"
 #define CSPV_API static
-#include "cute_spirv.h"
+#include <cute/cute_spirv.h>
 
 typedef struct {
 	const char* name;

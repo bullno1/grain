@@ -11,8 +11,7 @@
 #include <dcimgui.h>
 #undef IMGUI_STB_NAMESPACE
 #include <dcimgui_internal.h>
-#define BCO_WRAPPER BGAME_FN_WRAPPER
-#include <bco.h>
+#include <bgame/bco.h>
 #include <barray.h>
 #include <limits.h>
 #include <float.h>

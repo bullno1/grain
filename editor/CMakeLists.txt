@@ -1,6 +1,5 @@
 set(SOURCES
 	"main.c"
-	"libs.c"
 	"debug_draw.c"
 	"pref.c"
 
